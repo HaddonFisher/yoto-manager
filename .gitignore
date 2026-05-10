@@ -1,0 +1,34 @@
+# Secrets & credentials
+yoto_token.json
+bot_config.json
+credentials.json
+
+# Runtime / state files
+bot_last_command.json
+bot_offset.json
+bot_pending.json
+bot_restart_ack.json
+tab_alive.json
+queue.json
+recent_playlists.json
+
+# Logs
+*.log
+*.log.*
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# URL shortcut files
+*.url
+
+# Internal planning docs
+_internal/
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json

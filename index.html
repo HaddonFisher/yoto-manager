@@ -1,0 +1,2704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🎧 Yoto Manager — Elijah &amp; Lev</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --purple: #6c47ff;
+      --purple-light: #ede9ff;
+      --purple-dark: #4f32cc;
+      --elijah: #f97316;
+      --elijah-light: #fff7ed;
+      --lev: #06b6d4;
+      --lev-light: #ecfeff;
+      --shared: #6c47ff;
+      --shared-light: #ede9ff;
+      --green: #22c55e;
+      --red: #ef4444;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-400: #9ca3af;
+      --gray-600: #4b5563;
+      --gray-800: #1f2937;
+      --radius: 12px;
+      --shadow: 0 2px 12px rgba(0,0,0,0.08);
+      --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--gray-50);
+      color: var(--gray-800);
+      min-height: 100vh;
+    }
+
+    /* ── AUTH SCREEN ── */
+    #auth-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .auth-card {
+      background: white;
+      border-radius: 20px;
+      padding: 48px 40px;
+      max-width: 440px;
+      width: 100%;
+      box-shadow: var(--shadow-lg);
+      text-align: center;
+    }
+
+    .auth-card .logo {
+      font-size: 52px;
+      margin-bottom: 16px;
+    }
+
+    .auth-card h1 {
+      font-size: 26px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .auth-card p {
+      color: var(--gray-600);
+      font-size: 15px;
+      line-height: 1.5;
+      margin-bottom: 32px;
+    }
+
+    .input-group {
+      text-align: left;
+      margin-bottom: 16px;
+    }
+
+    .input-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--gray-600);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .input-group input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 2px solid var(--gray-200);
+      border-radius: var(--radius);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-group input:focus {
+      border-color: var(--purple);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: var(--radius);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--purple);
+      color: white;
+      width: 100%;
+    }
+
+    .btn-primary:hover { background: var(--purple-dark); transform: translateY(-1px); }
+    .btn-primary:disabled { background: var(--gray-400); cursor: not-allowed; transform: none; }
+
+    .btn-sm {
+      padding: 6px 14px;
+      font-size: 13px;
+      border-radius: 8px;
+    }
+
+    .btn-danger { background: #fee2e2; color: var(--red); }
+    .btn-danger:hover { background: var(--red); color: white; }
+
+    .btn-ghost { background: var(--gray-100); color: var(--gray-800); }
+    .btn-ghost:hover { background: var(--gray-200); }
+
+    .device-code-box {
+      background: var(--purple-light);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin: 24px 0;
+    }
+
+    .device-code-box .code {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      color: var(--purple);
+      margin: 12px 0;
+    }
+
+    .device-code-box a {
+      color: var(--purple);
+      font-weight: 600;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      background: #fee2e2;
+      color: var(--red);
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-top: 12px;
+    }
+
+    .setup-guide {
+      background: var(--purple-light);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .setup-guide p {
+      color: var(--gray-800);
+      font-size: 14px;
+      line-height: 1.55;
+      margin-bottom: 8px;
+    }
+
+    .setup-guide p:last-child { margin-bottom: 0; }
+
+    .setup-guide-link { color: var(--gray-600) !important; }
+
+    .setup-guide a, .input-hint a, .auth-footer a {
+      color: var(--purple);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .setup-guide a:hover, .input-hint a:hover, .auth-footer a:hover {
+      text-decoration: underline;
+    }
+
+    .input-hint {
+      display: block;
+      font-size: 12px;
+      color: var(--gray-400);
+      margin-top: 6px;
+    }
+
+    .auth-footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 20px;
+      font-size: 13px;
+      color: var(--gray-400);
+    }
+
+    /* ── MAIN APP ── */
+    #app-screen { display: none; }
+
+    header {
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-logo {
+      font-size: 22px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .refresh-btn {
+      background: none;
+      border: 2px solid var(--gray-200);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--gray-600);
+      transition: all 0.2s;
+    }
+
+    .refresh-btn:hover { border-color: var(--purple); color: var(--purple); }
+
+    .logout-btn {
+      background: none;
+      border: none;
+      font-size: 13px;
+      color: var(--gray-400);
+      cursor: pointer;
+      padding: 6px 10px;
+    }
+
+    .logout-btn:hover { color: var(--red); }
+
+
+    /* ── MAIN CONTENT ── */
+    .main-layout {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 0;
+      height: calc(100vh - 113px); /* fixed height so each panel scrolls independently */
+    }
+
+    .card-grid-panel {
+      padding: 28px 32px;
+      overflow-y: auto;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .panel-title {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    /* ── CARD GRID ── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 16px;
+    }
+
+    .yoto-card {
+      background: white;
+      border-radius: var(--radius);
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 2px solid transparent;
+      box-shadow: var(--shadow);
+    }
+
+    .yoto-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .yoto-card.selected {
+      border-color: var(--purple);
+    }
+
+    .yoto-card .card-art {
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 8px;
+      background: var(--gray-100);
+      margin-bottom: 10px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+    }
+
+    .yoto-card .card-art img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .yoto-card .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.3;
+      margin-bottom: 4px;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    .yoto-card .card-meta {
+      font-size: 11px;
+      color: var(--gray-400);
+    }
+
+
+    /* ── DETAIL PANEL ── */
+    .detail-panel {
+      border-left: 1px solid var(--gray-200);
+      background: white;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .detail-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--gray-400);
+      text-align: center;
+      padding: 40px;
+      gap: 12px;
+    }
+
+    .detail-empty .icon { font-size: 48px; }
+
+    .detail-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--gray-200);
+    }
+
+    .detail-art {
+      width: 80px;
+      height: 80px;
+      border-radius: 10px;
+      background: var(--gray-100);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .detail-art img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .detail-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .detail-subtitle {
+      font-size: 13px;
+      color: var(--gray-600);
+      margin-bottom: 12px;
+    }
+
+    .detail-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .track-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 24px;
+    }
+
+    .track-list-header {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--gray-400);
+      margin-bottom: 10px;
+    }
+
+    .track-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      transition: background 0.15s;
+      cursor: default;
+    }
+
+    .track-item:hover { background: var(--gray-50); }
+
+    .track-num {
+      font-size: 12px;
+      color: var(--gray-400);
+      width: 20px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .track-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    /* Clickable icon button wrapping each track's 16x16 icon */
+    .track-icon-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 2px;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .track-icon-btn:hover { background: var(--purple-light); }
+    .track-icon-btn img {
+      width: 16px;
+      height: 16px;
+      image-rendering: pixelated;
+      display: block;
+    }
+
+    /* ── ICON PICKER MODAL ── */
+    .icon-picker-search {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--gray-200);
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 12px;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .icon-picker-search:focus { border-color: var(--purple); }
+
+    .icon-picker-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 300px;
+      overflow-y: auto;
+      padding: 4px;
+    }
+
+    .icon-picker-cell {
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: all 0.15s;
+      background: var(--gray-50);
+    }
+    .icon-picker-cell:hover  { background: var(--purple-light); border-color: var(--purple); }
+    .icon-picker-cell.selected { border-color: var(--purple); background: var(--purple-light); }
+    .icon-picker-section-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--gray-400); padding: 8px 2px 4px; width: 100%;
+    }
+    .icon-picker-grid-section {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; width: 100%;
+    }
+    .icon-picker-cell img {
+      width: 20px;
+      height: 20px;
+      image-rendering: pixelated;
+    }
+    .icon-picker-loading {
+      grid-column: 1/-1;
+      text-align: center;
+      color: var(--gray-400);
+      font-size: 14px;
+      padding: 24px 0;
+    }
+
+    .track-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .track-name {
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-duration {
+      font-size: 12px;
+      color: var(--gray-400);
+    }
+
+    .track-remove {
+      background: none;
+      border: none;
+      color: var(--gray-400);
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      opacity: 0;
+      transition: all 0.15s;
+      font-size: 16px;
+    }
+
+    .track-item:hover .track-remove { opacity: 1; }
+    .track-remove:hover { color: var(--red); background: #fee2e2; }
+
+    .track-list-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--gray-200);
+    }
+
+    /* ── UPLOAD MODAL ── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      padding: 24px;
+    }
+
+    .modal {
+      background: white;
+      border-radius: 20px;
+      padding: 32px;
+      max-width: 480px;
+      width: 100%;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .modal h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .modal p {
+      color: var(--gray-600);
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+
+    .drop-zone {
+      border: 2px dashed var(--gray-200);
+      border-radius: var(--radius);
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 16px;
+    }
+
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--purple);
+      background: var(--purple-light);
+    }
+
+    .drop-zone .drop-icon { font-size: 36px; margin-bottom: 8px; }
+    .drop-zone p { margin: 0; font-size: 14px; }
+    .drop-zone strong { color: var(--purple); }
+
+    #file-input { display: none; }
+
+    .file-queue {
+      margin-bottom: 16px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+
+    .file-queue-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--gray-50);
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    .file-queue-item .fname { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-queue-item .fsize { color: var(--gray-400); flex-shrink: 0; }
+    .file-queue-item .fremove { background: none; border: none; cursor: pointer; color: var(--gray-400); font-size: 14px; }
+    .file-queue-item .fremove:hover { color: var(--red); }
+
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+    /* ── LOADING / STATUS ── */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(255,255,255,0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 300;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .loading-overlay .spinner-dark {
+      width: 36px;
+      height: 36px;
+      border: 4px solid var(--gray-200);
+      border-top-color: var(--purple);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 32px;
+      right: 32px;
+      background: var(--gray-800);
+      color: white;
+      padding: 12px 20px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 400;
+      animation: slideUp 0.3s ease;
+      max-width: 320px;
+    }
+
+    .toast.success { background: var(--green); }
+    .toast.error { background: var(--red); }
+
+    @keyframes slideUp {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--gray-400);
+    }
+
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state p { font-size: 15px; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 640px) {
+      .main-layout { grid-template-columns: 1fr; }
+      .detail-panel { display: none; }
+      .detail-panel.mobile-open { display: flex; position: fixed; inset: 0; z-index: 150; }
+      header, .card-grid-panel { padding-left: 16px; padding-right: 16px; }
+    }
+
+    /* ── Queue panel ───────────────────────────────────────── */
+    .queue-btn-wrap { position: relative; display: inline-flex; }
+    .queue-badge {
+      position: absolute; top: -6px; right: -6px;
+      background: var(--red); color: white;
+      font-size: 10px; font-weight: 700; line-height: 1;
+      padding: 3px 5px; border-radius: 99px;
+      display: none;
+    }
+    .queue-panel {
+      display: flex; flex-direction: column;
+      background: white; border-radius: 16px;
+      width: min(680px, 95vw); max-height: 80vh;
+      overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.18);
+    }
+    .queue-panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 24px 16px; border-bottom: 1px solid var(--gray-200);
+      flex-shrink: 0;
+    }
+    .queue-panel-header h2 { margin: 0; font-size: 18px; font-weight: 700; }
+    .queue-panel-body { overflow-y: auto; padding: 16px 24px; flex: 1; }
+    .queue-empty {
+      text-align: center; padding: 48px 0; color: var(--gray-400);
+    }
+    .queue-empty .icon { font-size: 36px; margin-bottom: 8px; }
+    .queue-item {
+      border: 1px solid var(--gray-200); border-radius: 12px;
+      padding: 16px; margin-bottom: 12px; background: var(--gray-50);
+    }
+    .queue-item-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 12px; margin-bottom: 10px;
+    }
+    .queue-item-title { font-weight: 600; font-size: 15px; flex: 1; }
+    .queue-reason {
+      font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 99px;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .queue-reason.user_saved  { background: #e0f2fe; color: #0369a1; }
+    .queue-reason.no_match    { background: #fef9c3; color: #854d0e; }
+    .queue-reason.upload_failed { background: #fee2e2; color: #991b1b; }
+    .queue-field { margin-bottom: 6px; font-size: 13px; line-height: 1.5; }
+    .queue-field-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      color: var(--gray-400); letter-spacing: .04em; margin-bottom: 2px;
+    }
+    .queue-field-value {
+      color: var(--gray-700); font-family: monospace; font-size: 12px;
+      background: white; border: 1px solid var(--gray-200);
+      border-radius: 6px; padding: 4px 8px; word-break: break-all;
+    }
+    .queue-field-value.plain { font-family: inherit; font-size: 13px; }
+    .queue-item-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 12px;
+    }
+    .queue-timestamp { font-size: 12px; color: var(--gray-400); }
+    .queue-clear-btn {
+      background: none; border: 1.5px solid var(--gray-200); border-radius: 8px;
+      padding: 5px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+      color: var(--gray-600); transition: all .15s;
+    }
+    .queue-clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+    /* ── SETTINGS PANEL ── */
+    .settings-panel {
+      display: flex; flex-direction: column;
+      background: white; border-radius: 16px;
+      width: min(520px, 95vw); max-height: 85vh;
+      overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.18);
+    }
+    .settings-panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 24px 16px; border-bottom: 1px solid var(--gray-200);
+      flex-shrink: 0;
+    }
+    .settings-panel-header h2 { margin: 0; font-size: 18px; font-weight: 700; }
+    .settings-panel-body { overflow-y: auto; padding: 20px 24px 24px; flex: 1; }
+    .settings-section { margin-bottom: 28px; }
+    .settings-section:last-child { margin-bottom: 0; }
+    .settings-section-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--gray-400); margin-bottom: 14px;
+    }
+    .settings-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid var(--gray-100); gap: 16px;
+    }
+    .settings-row:last-child { border-bottom: none; }
+    .settings-row-label { font-size: 14px; font-weight: 500; color: var(--gray-800); }
+    .settings-row-value {
+      font-size: 13px; color: var(--gray-600);
+      font-family: monospace; letter-spacing: .02em;
+    }
+    .settings-status {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 600;
+    }
+    .settings-status .dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .settings-status.running .dot  { background: var(--green); }
+    .settings-status.running       { color: var(--green); }
+    .settings-status.unconfigured .dot { background: var(--gray-400); }
+    .settings-status.unconfigured  { color: var(--gray-400); }
+
+    /* iOS-style toggle switch */
+    .toggle-wrap { display: flex; align-items: center; gap: 10px; }
+    .toggle-wrap .toggle-label { font-size: 14px; color: var(--gray-600); }
+    .ios-toggle { position: relative; display: inline-block; width: 44px; height: 26px; flex-shrink: 0; }
+    .ios-toggle input { opacity: 0; width: 0; height: 0; }
+    .ios-toggle .slider {
+      position: absolute; inset: 0; background: var(--gray-200);
+      border-radius: 26px; cursor: pointer; transition: background .2s;
+    }
+    .ios-toggle .slider::before {
+      content: ''; position: absolute;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: white; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+      left: 3px; top: 3px; transition: transform .2s;
+    }
+    .ios-toggle input:checked + .slider { background: var(--purple); }
+    .ios-toggle input:checked + .slider::before { transform: translateX(18px); }
+
+    /* Mode toggle (pill tabs) */
+    .mode-toggle {
+      display: inline-flex; border: 1.5px solid var(--gray-200); border-radius: 8px; overflow: hidden;
+    }
+    .mode-toggle button {
+      background: none; border: none; padding: 6px 14px; font-size: 13px; font-weight: 500;
+      cursor: pointer; color: var(--gray-600); transition: all .15s;
+    }
+    .mode-toggle button.active { background: var(--purple); color: white; }
+    .mode-toggle button:not(.active):hover { background: var(--gray-100); }
+
+    .settings-input {
+      width: 100%; padding: 9px 12px; border: 1.5px solid var(--gray-200);
+      border-radius: 8px; font-size: 13px; outline: none; transition: border-color .2s;
+      font-family: monospace; color: var(--gray-800);
+    }
+    .settings-input:focus { border-color: var(--purple); }
+    .settings-input:disabled { background: var(--gray-50); color: var(--gray-400); }
+    .settings-save-row {
+      display: flex; justify-content: flex-end; margin-top: 18px;
+    }
+    .settings-save-btn {
+      background: var(--purple); color: white; border: none;
+      border-radius: 8px; padding: 8px 22px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: background .15s;
+    }
+    .settings-save-btn:hover { background: var(--purple-dark); }
+    .settings-save-btn:disabled { background: var(--gray-400); cursor: not-allowed; }
+
+    /* ── RELOADING SCREEN ── */
+    #reloading-screen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: #fff7ed;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+    }
+    #reloading-screen .domo-wrap {
+      animation: domo-bob 1.6s ease-in-out infinite;
+      filter: drop-shadow(0 12px 24px rgba(214,85,0,.22));
+    }
+    #reloading-screen .reload-label {
+      font-size: 22px;
+      font-weight: 700;
+      color: #c2440a;
+      letter-spacing: .01em;
+    }
+    #reloading-screen .reload-label::after {
+      content: '';
+      animation: dot-cycle 1.5s steps(1, end) infinite;
+    }
+    @keyframes domo-bob {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-10px); }
+    }
+    @keyframes dot-cycle {
+      0%   { content: ''; }
+      25%  { content: '.'; }
+      50%  { content: '..'; }
+      75%  { content: '...'; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     RELOADING SCREEN
+══════════════════════════════════════════ -->
+<div id="reloading-screen">
+  <div class="domo-wrap">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 0 120 115" width="160" height="154" aria-hidden="true">
+      <defs>
+        <radialGradient id="dg" cx="38%" cy="28%" r="72%">
+          <stop offset="0%" stop-color="#FF8C2A"/>
+          <stop offset="100%" stop-color="#D45500"/>
+        </radialGradient>
+        <linearGradient id="dl" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#D45500"/>
+          <stop offset="100%" stop-color="#AA3D00"/>
+        </linearGradient>
+      </defs>
+      <!-- Arms (behind body) -->
+      <ellipse cx="2"  cy="55" rx="10" ry="14" fill="#C24D00"/>
+      <ellipse cx="98" cy="55" rx="10" ry="14" fill="#C24D00"/>
+      <!-- Body -->
+      <rect x="8" y="3" width="84" height="90" rx="12" fill="url(#dg)"/>
+      <!-- Eyes — white ovals -->
+      <ellipse cx="33" cy="26" rx="12" ry="14" fill="white"/>
+      <ellipse cx="67" cy="26" rx="12" ry="14" fill="white"/>
+      <!-- Pupils -->
+      <circle cx="34" cy="28" r="8"   fill="#111"/>
+      <circle cx="68" cy="28" r="8"   fill="#111"/>
+      <!-- Eye shine -->
+      <circle cx="38" cy="23" r="3.5" fill="white"/>
+      <circle cx="72" cy="23" r="3.5" fill="white"/>
+      <!-- Mouth background -->
+      <rect x="11" y="53" width="78" height="35" rx="7" fill="#200808"/>
+      <!-- Top teeth (4) -->
+      <rect x="14" y="53" width="13" height="17" rx="3" fill="#f0f0f0"/>
+      <rect x="33" y="53" width="13" height="17" rx="3" fill="#f0f0f0"/>
+      <rect x="52" y="53" width="13" height="17" rx="3" fill="#f0f0f0"/>
+      <rect x="71" y="53" width="13" height="17" rx="3" fill="#f0f0f0"/>
+      <!-- Bottom teeth (3, offset) -->
+      <rect x="21" y="71" width="13" height="15" rx="3" fill="#f0f0f0"/>
+      <rect x="40" y="71" width="13" height="15" rx="3" fill="#f0f0f0"/>
+      <rect x="59" y="71" width="13" height="15" rx="3" fill="#f0f0f0"/>
+      <!-- Legs -->
+      <rect x="20" y="90" width="25" height="22" rx="9" fill="url(#dl)"/>
+      <rect x="55" y="90" width="25" height="22" rx="9" fill="url(#dl)"/>
+    </svg>
+  </div>
+  <div class="reload-label">Reloading</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     AUTH SCREEN
+══════════════════════════════════════════ -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="logo">🎧</div>
+    <h1>Yoto Manager</h1>
+    <p>Manage Elijah &amp; Lev's Yoto cards and playlists in one place.</p>
+
+    <!-- Step 1: Enter Client ID -->
+    <div id="step-clientid">
+      <div class="setup-guide">
+        <p>To connect, you need a <strong>Yoto Client ID</strong> — a short code that authorises this app to access your Yoto account. After entering it you'll be taken to Yoto's own login page where you sign in with your <strong>Yoto email and password</strong> (the same credentials you use in the Yoto app). Your token is stored locally in this browser and never leaves your computer.</p>
+        <p class="setup-guide-link">Get your free Client ID at <a href="https://yoto.dev/authentication/browser-auth/" target="_blank" rel="noopener">yoto.dev →</a></p>
+      </div>
+      <div class="input-group">
+        <label>Yoto Client ID</label>
+        <input type="text" id="client-id-input" placeholder="Paste your Client ID here" />
+        <span class="input-hint">From <a href="https://yoto.dev/authentication/browser-auth/" target="_blank" rel="noopener">yoto.dev/authentication/browser-auth</a></span>
+      </div>
+      <button class="btn btn-primary" onclick="startAuth()">
+        Connect to Yoto →
+      </button>
+      <div id="auth-error" class="error-msg" style="display:none;"></div>
+      <div class="auth-footer">
+        <span>New to Yoto? <a href="https://yotoplay.com" target="_blank" rel="noopener">yotoplay.com</a></span>
+        <span>·</span>
+        <a href="https://github.com/YOUR_USERNAME/yoto-manager#readme" target="_blank" rel="noopener">Need help?</a>
+      </div>
+    </div>
+
+    <!-- Step 2: Redirecting to Yoto -->
+    <div id="step-redirecting" style="display:none;">
+      <div style="text-align:center; padding: 16px 0;">
+        <div class="spinner" style="margin: 0 auto 16px; display:block; width:28px; height:28px; border:3px solid #ede9ff; border-top-color:#6c47ff; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
+        <p style="color:var(--gray-600); font-size:15px;">Redirecting you to Yoto to log in…</p>
+      </div>
+    </div>
+
+    <!-- Step 3: Exchanging code (returned from Yoto) -->
+    <div id="step-exchanging" style="display:none;">
+      <div id="exchanging-progress" style="text-align:center; padding: 16px 0;">
+        <div class="spinner" style="margin: 0 auto 16px; display:block; width:28px; height:28px; border:3px solid #ede9ff; border-top-color:#6c47ff; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
+        <p style="color:var(--gray-600); font-size:15px;">Completing login…</p>
+      </div>
+      <div id="exchange-error" class="error-msg" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     MAIN APP
+══════════════════════════════════════════ -->
+<div id="app-screen">
+
+  <header>
+    <div class="header-logo">🎧 Yoto Manager</div>
+    <div class="header-actions">
+      <button class="refresh-btn" onclick="promptCreatePlaylist()">➕ New Playlist</button>
+      <button class="refresh-btn" onclick="loadLibrary()">↺ Refresh</button>
+      <div class="queue-btn-wrap">
+        <button class="refresh-btn" onclick="openQueuePanel()" title="Saved for later">📥 Queue</button>
+        <span class="queue-badge" id="queue-badge">0</span>
+      </div>
+      <button class="refresh-btn" onclick="showTokenDebug()" title="Inspect JWT token claims" style="font-size:12px;">🔍 Debug token</button>
+      <button class="refresh-btn" onclick="openSettingsPanel()" title="Settings">⚙️ Settings</button>
+      <button class="logout-btn" onclick="logout()">Log out</button>
+    </div>
+  </header>
+
+  <div class="main-layout">
+    <!-- Left: card grid -->
+    <div class="card-grid-panel">
+      <div class="panel-header">
+        <div class="panel-title" id="panel-title">All Cards</div>
+      </div>
+      <div class="card-grid" id="card-grid">
+        <div class="empty-state">
+          <div class="icon">🎧</div>
+          <p>Loading your library…</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: detail panel -->
+    <div class="detail-panel" id="detail-panel">
+      <div class="detail-empty" id="detail-empty">
+        <div class="icon">👈</div>
+        <p>Select a card to see its tracks</p>
+      </div>
+      <div id="detail-content" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+        <div class="detail-header">
+          <div class="detail-art" id="detail-art">🎵</div>
+          <div class="detail-title" id="detail-title">—</div>
+          <div class="detail-subtitle" id="detail-subtitle">—</div>
+          <div class="detail-actions">
+            <button class="btn btn-ghost btn-sm" onclick="openUploadModal()">＋ Add Tracks</button>
+            <button class="btn btn-danger btn-sm" id="delete-card-btn" onclick="deleteSelectedCard()">🗑 Delete Card</button>
+          </div>
+        </div>
+        <div class="track-list" id="track-list">
+          <div class="track-list-header">Tracks</div>
+          <div id="tracks-container"></div>
+        </div>
+        <div class="track-list-footer">
+          <button class="btn btn-ghost btn-sm" style="width:100%; display:none;" onclick="saveTrackChanges()" id="save-btn">
+            💾 Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Upload Modal -->
+<div class="modal-backdrop" id="upload-modal" style="display:none;" onclick="closeUploadModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2>Add Tracks</h2>
+    <p id="upload-modal-subtitle">Upload audio files to add to this card.</p>
+    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <div class="drop-icon">🎵</div>
+      <p><strong>Click to browse</strong> or drag &amp; drop</p>
+      <p style="margin-top:4px; font-size:12px; color:#9ca3af;">MP3, M4A, AAC, WAV, FLAC · or drag a YouTube URL</p>
+    </div>
+    <input type="file" id="file-input" accept=".mp3,.m4a,.aac,.wav,.flac" multiple onchange="handleFiles(this.files)" />
+    <div class="file-queue" id="file-queue"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeUploadModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="uploadTracks()" id="upload-btn" style="width:auto;">
+        Upload Tracks
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Icon Picker Modal -->
+<div class="modal-backdrop" id="icon-picker-modal" style="display:none;" onclick="closeIconPicker(event)">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:560px; max-height:90vh; display:flex; flex-direction:column;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+      <h2 style="margin:0;">Choose Icon</h2>
+      <button class="btn btn-primary" style="width:auto; font-size:13px; padding:6px 14px;" onclick="document.getElementById('icon-upload-input').click()">
+        ⬆ Upload Icon
+      </button>
+    </div>
+    <p style="margin-bottom:10px;">Select an icon for this track, or upload your own image.</p>
+    <input type="file" id="icon-upload-input" accept="image/*" style="display:none;" onchange="handleIconUpload(this)" />
+    <div id="icon-upload-status" style="display:none; font-size:13px; color:var(--gray-600); padding:6px 0; margin-bottom:4px;"></div>
+    <input class="icon-picker-search" id="icon-picker-search" type="text"
+           placeholder="Search icons…" oninput="renderIconPickerGrid(this.value)" />
+    <div class="icon-picker-grid" id="icon-picker-grid">
+      <p class="icon-picker-loading">Loading icons…</p>
+    </div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn btn-ghost" onclick="closeIconPicker()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Queue Panel -->
+<div class="modal-backdrop" id="queue-modal" style="display:none;" onclick="closeQueuePanel(event)">
+  <div class="queue-panel" onclick="event.stopPropagation()">
+    <div class="queue-panel-header">
+      <h2>📥 Saved for Later</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeQueuePanel()">✕ Close</button>
+    </div>
+    <div class="queue-panel-body" id="queue-panel-body">
+      <div class="queue-empty">
+        <div class="icon">✅</div>
+        <p>Nothing here — all caught up!</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Panel -->
+<div class="modal-backdrop" id="settings-modal" style="display:none;" onclick="closeSettingsPanel(event)">
+  <div class="settings-panel" onclick="event.stopPropagation()">
+    <div class="settings-panel-header">
+      <h2>⚙️ Settings</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeSettingsPanel()">✕ Close</button>
+    </div>
+    <div class="settings-panel-body">
+
+      <!-- Section A: Telegram Bot -->
+      <div class="settings-section">
+        <div class="settings-section-title">Telegram Bot</div>
+        <div class="settings-row">
+          <span class="settings-row-label">Status</span>
+          <span class="settings-status unconfigured" id="settings-bot-status">
+            <span class="dot"></span><span id="settings-bot-status-text">Not configured</span>
+          </span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-row-label">Bot token</span>
+          <span class="settings-row-value" id="settings-bot-token">—</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-row-label">Allowed group ID</span>
+          <span class="settings-row-value" id="settings-bot-group">—</span>
+        </div>
+      </div>
+
+      <!-- Section B: Local Backup -->
+      <div class="settings-section">
+        <div class="settings-section-title">Local Backup</div>
+        <div class="settings-row">
+          <span class="settings-row-label">Enable backup</span>
+          <label class="ios-toggle">
+            <input type="checkbox" id="backup-enabled" onchange="onBackupToggle()">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="settings-row" id="backup-path-row">
+          <span class="settings-row-label" style="flex-shrink:0;">Backup path</span>
+          <input class="settings-input" id="backup-path" type="text"
+                 placeholder="/path/to/folder"
+                 value="/Users/haddonfisher/Dropbox/Yoto Cards" />
+        </div>
+        <div class="settings-row" id="backup-mode-row">
+          <span class="settings-row-label">Mode</span>
+          <div class="mode-toggle">
+            <button id="mode-organized" class="active" onclick="setBackupMode('organized')">Organized</button>
+            <button id="mode-flat" onclick="setBackupMode('flat')">Flat</button>
+          </div>
+        </div>
+        <p style="font-size:12px; color:var(--gray-400); margin-top:10px; line-height:1.5;" id="backup-mode-hint">
+          Saves to <code style="font-size:11px;">&lt;path&gt;/&lt;playlist name&gt;/&lt;filename&gt;</code>
+        </p>
+      </div>
+
+      <div class="settings-save-row">
+        <button class="settings-save-btn" id="settings-save-btn" onclick="saveSettings()">Save</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Debug Panel -->
+<div id="debug-panel" style="display:none; position:fixed; bottom:0; left:0; right:0; background:#1e1e2e; color:#cdd6f4; font-family:monospace; font-size:12px; max-height:50vh; overflow:auto; z-index:9999; padding:16px; border-top:2px solid #6c47ff;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+    <strong style="color:#cba6f7;">🔍 Debug Panel</strong>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button onclick="testRawEndpoint('/content/mine')" style="background:#313244;border:none;color:#cdd6f4;cursor:pointer;padding:4px 10px;border-radius:6px;font-size:11px;">Test /content/mine</button>
+      <button onclick="testRawEndpoint('/card/family')" style="background:#313244;border:none;color:#cdd6f4;cursor:pointer;padding:4px 10px;border-radius:6px;font-size:11px;">Test /card/family</button>
+      <button onclick="testRawEndpoint('/user/me')" style="background:#313244;border:none;color:#cdd6f4;cursor:pointer;padding:4px 10px;border-radius:6px;font-size:11px;">Test /user/me</button>
+      <button onclick="testRawEndpoint('/profile')" style="background:#313244;border:none;color:#cdd6f4;cursor:pointer;padding:4px 10px;border-radius:6px;font-size:11px;">Test /profile</button>
+      <button onclick="document.getElementById('debug-panel').style.display='none'" style="background:none;border:1px solid #585b70;color:#cdd6f4;cursor:pointer;padding:4px 10px;border-radius:6px;font-size:11px;">✕ Close</button>
+    </div>
+  </div>
+  <pre id="debug-content" style="white-space:pre-wrap; word-break:break-all; margin-top:8px;"></pre>
+</div>
+
+<script>
+/* ════════════════════════════════════════════
+   CONSTANTS & STATE
+════════════════════════════════════════════ */
+// Requests go via the local proxy in server.py to avoid CORS issues.
+const API_BASE   = '/yoto-api';
+const AUTH_BASE  = '/yoto-auth';
+
+const state = {
+  token:         localStorage.getItem('yoto_token'),
+  refreshToken:  localStorage.getItem('yoto_refresh_token'),
+  clientId:      localStorage.getItem('yoto_client_id'),
+  cards:         [],
+  selectedCard:  null,
+  pendingTracks: [],
+  filesToUpload: [],
+  publicIcons:   [],   // [{ mediaId, url, name? }] from GET /icons/public
+  iconLookup:    {},   // { mediaId: url } for O(1) icon resolving
+  _selectCardSeq: 0,   // monotonic counter so concurrent selectCard() calls don't race
+};
+
+/* ════════════════════════════════════════════
+   INIT
+════════════════════════════════════════════ */
+window.addEventListener('DOMContentLoaded', async () => {
+  // PKCE callback — Yoto redirected back with ?code=
+  if (new URLSearchParams(window.location.search).has('code')) {
+    await handleCallback();
+    return;
+  }
+  if (state.token) {
+    showApp();
+    loadLibrary();
+  }
+});
+
+/* ════════════════════════════════════════════
+   AUTH — AUTHORIZATION CODE + PKCE FLOW
+   https://yoto.dev/authentication/browser-auth/
+════════════════════════════════════════════ */
+
+// Generate a PKCE code verifier + SHA-256 challenge using Web Crypto
+async function generatePKCE() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  const verifier = btoa(String.fromCharCode(...array))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+  return { verifier, challenge };
+}
+
+// Random URL-safe string for the OAuth `state` CSRF token
+function randomState() {
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  return btoa(String.fromCharCode(...buf))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function startAuth() {
+  const clientId = document.getElementById('client-id-input').value.trim();
+  if (!clientId) { showAuthError('Please enter your Client ID.'); return; }
+  hideAuthError();
+
+  // Show redirecting state
+  document.getElementById('step-clientid').style.display = 'none';
+  document.getElementById('step-redirecting').style.display = 'block';
+
+  const { verifier, challenge } = await generatePKCE();
+  const redirectUri = window.location.origin + window.location.pathname;
+  const state       = randomState();
+
+  // Persist PKCE state for after the redirect
+  sessionStorage.setItem('pkce_verifier',    verifier);
+  sessionStorage.setItem('pkce_client_id',   clientId);
+  sessionStorage.setItem('pkce_redirect_uri', redirectUri);
+  sessionStorage.setItem('pkce_state',       state);
+
+  const params = new URLSearchParams({
+    audience:              'https://api.yotoplay.com',
+    scope:                 'offline_access user:content:view user:content:manage user:icons:manage',
+    response_type:         'code',
+    client_id:             clientId,
+    code_challenge:        challenge,
+    code_challenge_method: 'S256',
+    redirect_uri:          redirectUri,
+    state,
+  });
+
+  window.location.href = `https://login.yotoplay.com/authorize?${params}`;
+}
+
+// Persist the current token to disk so the Telegram bot can use it.
+// Fire-and-forget — failures are logged but never block the UI.
+function persistTokenLocally() {
+  if (!state.token) return;
+  fetch('/local/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      access_token:  state.token,
+      refresh_token: state.refreshToken || null,
+      client_id:     state.clientId    || null,
+    }),
+  }).catch(err => console.warn('persistTokenLocally failed:', err));
+}
+
+function clearPKCEState() {
+  sessionStorage.removeItem('pkce_verifier');
+  sessionStorage.removeItem('pkce_client_id');
+  sessionStorage.removeItem('pkce_redirect_uri');
+  sessionStorage.removeItem('pkce_state');
+}
+
+function showExchangeError(msg) {
+  document.getElementById('exchanging-progress').style.display = 'none';
+  document.getElementById('exchange-error').textContent = msg;
+  document.getElementById('exchange-error').style.display = 'block';
+}
+
+// Called on page load when Yoto redirects back with ?code=
+async function handleCallback() {
+  document.getElementById('step-clientid').style.display = 'none';
+  document.getElementById('step-exchanging').style.display = 'block';
+
+  const params      = new URLSearchParams(window.location.search);
+  const code        = params.get('code');
+  const returnedState = params.get('state');
+  const verifier    = sessionStorage.getItem('pkce_verifier');
+  const clientId    = sessionStorage.getItem('pkce_client_id');
+  const redirectUri = sessionStorage.getItem('pkce_redirect_uri');
+  const expectedState = sessionStorage.getItem('pkce_state');
+
+  // Clear the ?code= from the URL without reloading
+  window.history.replaceState({}, '', window.location.pathname);
+
+  if (!code || !verifier || !clientId) {
+    clearPKCEState();
+    showExchangeError('Auth session missing — please log in again.');
+    return;
+  }
+
+  // CSRF defence: the state param must match what we generated before redirecting.
+  // (If we never set one, e.g. legacy session, skip the check rather than locking the user out.)
+  if (expectedState && returnedState !== expectedState) {
+    clearPKCEState();
+    showExchangeError('Auth state mismatch — please try logging in again.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${AUTH_BASE}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'authorization_code',
+        client_id:     clientId,
+        code_verifier: verifier,
+        code,
+        redirect_uri:  redirectUri,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (data.access_token) {
+      clearPKCEState();
+
+      state.token       = data.access_token;
+      state.refreshToken = data.refresh_token || null;
+      state.clientId    = clientId;
+      localStorage.setItem('yoto_token',    data.access_token);
+      localStorage.setItem('yoto_client_id', clientId);
+      if (data.refresh_token) localStorage.setItem('yoto_refresh_token', data.refresh_token);
+
+      persistTokenLocally(); // keep yoto_token.json fresh for the Telegram bot
+
+      showApp();
+      loadLibrary();
+    } else {
+      // Stale verifier is no longer useful — the next attempt must generate fresh PKCE.
+      clearPKCEState();
+      const raw = data.error_description || data.error || '';
+      let msg;
+      if (data.error === 'invalid_client' || raw.toLowerCase().includes('client')) {
+        msg = 'Invalid Client ID — double-check the value at yoto.dev.';
+      } else if (data.error === 'access_denied') {
+        msg = 'Login cancelled — please try again.';
+      } else if (raw) {
+        msg = `Login failed: ${raw}`;
+      } else {
+        msg = 'Login failed — please try again.';
+      }
+      showExchangeError(msg);
+    }
+  } catch (err) {
+    showExchangeError('Could not reach Yoto — check your internet connection and try again.');
+  }
+}
+
+async function refreshAccessToken() {
+  if (!state.refreshToken || !state.clientId) return false;
+  try {
+    const res = await fetch(`${AUTH_BASE}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'refresh_token',
+        refresh_token: state.refreshToken,
+        client_id:     state.clientId,
+      }),
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      state.token = data.access_token;
+      localStorage.setItem('yoto_token', data.access_token);
+      if (data.refresh_token) {
+        state.refreshToken = data.refresh_token;
+        localStorage.setItem('yoto_refresh_token', data.refresh_token);
+      }
+      persistTokenLocally(); // keep yoto_token.json fresh for the Telegram bot
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+async function promptCreatePlaylist() {
+  const name = window.prompt('New playlist name:');
+  if (!name || !name.trim()) return;
+  showLoading('Creating playlist…');
+  try {
+    const result = await api('/content', 'POST', {
+      title:    name.trim(),
+      metadata: { title: name.trim() },
+      content:  { chapters: [] },
+      deleted:  false,
+    });
+    hideLoading();
+    showToast(`✅ Created "${name.trim()}"`, 'success');
+    await loadLibrary();
+  } catch (err) {
+    hideLoading();
+    showToast('Failed to create playlist: ' + err.message, 'error');
+  }
+}
+
+function logout() {
+  localStorage.removeItem('yoto_token');
+  localStorage.removeItem('yoto_refresh_token');
+  localStorage.removeItem('yoto_client_id');
+  clearPKCEState();
+  state.token = null;
+  state.refreshToken = null;
+  state.cards = [];
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('step-clientid').style.display = 'block';
+  document.getElementById('step-redirecting').style.display = 'none';
+  document.getElementById('step-exchanging').style.display = 'none';
+  document.getElementById('client-id-input').value = '';
+}
+
+/* ════════════════════════════════════════════
+   DEBUG / TOKEN INSPECTOR
+════════════════════════════════════════════ */
+function showTokenDebug() {
+  const panel   = document.getElementById('debug-panel');
+  const content = document.getElementById('debug-content');
+
+  if (!state.token) {
+    content.textContent = 'No token stored. Log in first.';
+    panel.style.display = 'block';
+    return;
+  }
+
+  // Try to decode as JWT (any number of parts)
+  const decode = (s) => {
+    try {
+      const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64 + '='.repeat((4 - b64.length % 4) % 4);
+      return JSON.parse(atob(padded));
+    } catch { return null; }
+  };
+
+  const parts   = state.token.split('.');
+  const header  = parts[0] ? decode(parts[0]) : null;
+  const payload = parts[1] ? decode(parts[1]) : null;
+  const now     = Math.floor(Date.now() / 1000);
+
+  const lines = [
+    `── TOKEN INFO ──`,
+    `Type    : ${parts.length === 3 ? 'JWT (signed)' : parts.length === 5 ? 'JWE (encrypted — payload not readable)' : `Opaque / unknown (${parts.length} parts)`}`,
+    `Length  : ${state.token.length} chars`,
+    `Parts   : ${parts.length}`,
+    '',
+  ];
+
+  if (header) {
+    lines.push('── HEADER ──', JSON.stringify(header, null, 2), '');
+  }
+
+  if (payload) {
+    const expiry  = payload.exp ? new Date(payload.exp * 1000).toLocaleString() : 'n/a';
+    const expired = payload.exp && payload.exp < now;
+    lines.push(
+      '── PAYLOAD ──',
+      JSON.stringify(payload, null, 2),
+      '',
+      '── CLAIMS ──',
+      `Expires : ${expiry}${expired ? '  ⚠️ EXPIRED' : '  ✅ valid'}`,
+      `Scopes  : ${payload.scope || payload.scp || '(none in payload)'}`,
+      `Subject : ${payload.sub || '(none)'}`,
+      `Audience: ${JSON.stringify(payload.aud || '(none)')}`,
+      `Issuer  : ${payload.iss || '(none)'}`,
+    );
+  } else if (parts.length === 5) {
+    lines.push('── NOTE ──', 'This is a JWE (encrypted) token — the payload is not readable without the server private key.',
+      'Scopes and claims are hidden inside the encrypted payload.',
+      'The 403 is NOT a token-decode issue — focus on the server logs.');
+  } else {
+    lines.push('── NOTE ──', 'Token is opaque — Yoto does not use decodable JWTs for access tokens.',
+      'Check the server terminal output for the full API response details.');
+  }
+
+  lines.push('', '── RAW (first 120 chars) ──', state.token.substring(0, 120) + '…');
+  content.textContent = lines.join('\n');
+  panel.style.display = 'block';
+}
+
+async function testRawEndpoint(path) {
+  const content = document.getElementById('debug-content');
+  content.textContent = `Testing GET ${path} …`;
+  document.getElementById('debug-panel').style.display = 'block';
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { 'Authorization': `Bearer ${state.token}`, 'Content-Type': 'application/json' }
+    });
+    const text = await res.text();
+    content.textContent = `HTTP ${res.status}\n\n${text}`;
+  } catch (e) {
+    content.textContent = `Fetch error: ${e.message}`;
+  }
+}
+
+/* ════════════════════════════════════════════
+   API
+════════════════════════════════════════════ */
+async function api(path, method = 'GET', body = null) {
+  const opts = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${state.token}`,
+      'Content-Type': 'application/json',
+    },
+  };
+  if (body) opts.body = JSON.stringify(body);
+
+  let res = await fetch(`${API_BASE}${path}`, opts);
+
+  // Try token refresh once on 401 or 403.
+  // Yoto returns 403 (not 401) when the access token expires, so we must handle both.
+  // If the refresh succeeds and the retry still 403s, it's a real permission error — don't logout.
+  if (res.status === 401 || res.status === 403) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      opts.headers['Authorization'] = `Bearer ${state.token}`;
+      res = await fetch(`${API_BASE}${path}`, opts);
+    } else if (res.status === 401) {
+      // Only force-logout on a hard 401 with no refresh available
+      logout();
+      throw new Error('Session expired. Please log in again.');
+    }
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`);
+  }
+
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+/* ════════════════════════════════════════════
+   LIBRARY
+════════════════════════════════════════════ */
+async function loadLibrary() {
+  showLoading('Loading your library…');
+  try {
+    // Load cards + public icon catalogue in parallel; icon load is non-fatal
+    const [data] = await Promise.all([
+      api('/content/mine'),
+      loadPublicIcons(),
+    ]);
+    state.cards = data.cards || data || [];
+    hideLoading();
+    updateCounts();
+    renderCardGrid();
+  } catch (err) {
+    hideLoading();
+    showToast(err.message, 'error');
+  }
+}
+
+function updateCounts() {
+  document.getElementById('panel-title').textContent = `All Cards (${state.cards.length})`;
+}
+
+/* ════════════════════════════════════════════
+   ICON CATALOGUE  (public + user-uploaded)
+════════════════════════════════════════════ */
+async function loadPublicIcons() {
+  // Fetch public Yoto icons + the current user's own uploaded icons in parallel.
+  // Both calls are non-fatal — icon rendering on tracks works without the catalogue.
+  const [publicResult, userResult] = await Promise.allSettled([
+    api('/media/displayIcons/user/yoto'),
+    api('/media/displayIcons/user/me'),
+  ]);
+
+  const publicIcons = publicResult.status === 'fulfilled'
+    ? (publicResult.value?.displayIcons || []) : [];
+  const userIcons = userResult.status === 'fulfilled'
+    ? (userResult.value?.displayIcons || []) : [];
+
+  if (publicResult.status === 'rejected')
+    console.log('Public icon catalogue unavailable:', publicResult.reason?.message);
+  if (userResult.status === 'rejected')
+    console.log('User icon catalogue unavailable:', userResult.reason?.message);
+
+  // Tag user icons so the picker can show them in a "My Icons" section
+  userIcons.forEach(ic => ic._userIcon = true);
+
+  // User icons first, then public
+  state.publicIcons = [...userIcons, ...publicIcons];
+
+  // Build URL lookup
+  state.iconLookup = {};
+  for (const icon of state.publicIcons) {
+    const mediaId = (icon.mediaId || icon.displayIconId || '').replace(/^#/, '');
+    if (mediaId) state.iconLookup[mediaId] = icon.url || iconSrc(`yoto:#${mediaId}`);
+  }
+
+  console.log(`Loaded ${userIcons.length} user icons + ${publicIcons.length} public icons`);
+}
+
+// Resolve a yoto: icon reference to a CDN URL.
+// Icons live at https://card-content.yotoplay.com/icons/{mediaId} — no auth required.
+// Format is "yoto:#mediaId" (custom) or "yoto:mediaId" (public built-in).
+function iconSrc(iconRef) {
+  if (!iconRef || !iconRef.startsWith('yoto:')) return '';
+  const mediaId = iconRef.slice(5).replace(/^#/, ''); // strip "yoto:" then optional "#"
+  if (!mediaId) return '';
+  return `https://card-content.yotoplay.com/icons/${mediaId}`;
+}
+
+// Return the HTML for a single track's icon cell (a clickable button that opens the picker)
+function trackIconHtml(chapter, trackIndex) {
+  const raw = chapter.display?.icon16x16 || '';
+  const src = iconSrc(raw);
+
+  const inner = src
+    ? `<img src="${escHtml(src)}" alt="icon" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'🎵',style:'font-size:16px'}))">`
+    : `<span style="font-size:16px;">🎵</span>`;
+
+  return `<button class="track-icon-btn" onclick="openIconPicker(${trackIndex})" title="Click to change icon">${inner}</button>`;
+}
+
+/* ════════════════════════════════════════════
+   ICON PICKER
+════════════════════════════════════════════ */
+let iconPickerIndex = -1;
+
+function openIconPicker(trackIndex) {
+  iconPickerIndex = trackIndex;
+  const modal = document.getElementById('icon-picker-modal');
+  document.getElementById('icon-picker-search').value = '';
+  renderIconPickerGrid('');
+  modal.style.display = 'flex';
+}
+
+function renderIconPickerGrid(filter) {
+  const grid   = document.getElementById('icon-picker-grid');
+  const track  = state.pendingTracks[iconPickerIndex];
+  const currId = (track?.display?.icon16x16 || '').replace('yoto:', '');
+
+  if (!state.publicIcons.length) {
+    grid.innerHTML = '<p class="icon-picker-loading">No icons loaded — check that the app is connected.</p>';
+    return;
+  }
+
+  const lower   = filter.toLowerCase();
+  const visible = filter
+    ? state.publicIcons.filter(ic => {
+        const searchable = [ic.title, ...(ic.publicTags || []), ic.mediaId].join(' ').toLowerCase();
+        return searchable.includes(lower);
+      })
+    : state.publicIcons;
+
+  if (!visible.length) {
+    grid.innerHTML = '<p class="icon-picker-loading">No icons match.</p>';
+    return;
+  }
+
+  const userIcons   = visible.filter(ic => ic._userIcon);
+  const publicIcons = visible.filter(ic => !ic._userIcon);
+
+  function renderCells(icons) {
+    return icons.map(ic => {
+      const url = ic.url || ic.imageUrl || '';
+      const isSelected = ic.mediaId === currId;
+      return `<div class="icon-picker-cell${isSelected ? ' selected' : ''}" onclick="selectIcon('${escHtml(ic.mediaId)}')" title="${escHtml(ic.title || 'My Icon')}">
+        <img src="${escHtml(url)}" alt="" loading="lazy" onerror="this.style.display='none'">
+      </div>`;
+    }).join('');
+  }
+
+  let html = '';
+  if (userIcons.length) {
+    html += `<div class="icon-picker-section-label">My Icons (${userIcons.length})</div>`;
+    html += `<div class="icon-picker-grid-section">${renderCells(userIcons)}</div>`;
+  }
+  if (publicIcons.length) {
+    if (userIcons.length) html += `<div class="icon-picker-section-label">Yoto Icons (${publicIcons.length})</div>`;
+    html += `<div class="icon-picker-grid-section">${renderCells(publicIcons)}</div>`;
+  }
+  grid.innerHTML = html;
+}
+
+function selectIcon(mediaId) {
+  if (iconPickerIndex < 0 || iconPickerIndex >= state.pendingTracks.length) return;
+  const track = state.pendingTracks[iconPickerIndex];
+  if (!track.display) track.display = {};
+  track.display.icon16x16 = `yoto:${mediaId}`;
+  closeIconPicker();
+  renderTrackList();
+  document.getElementById('save-btn').style.display = 'flex';
+}
+
+function closeIconPicker(e) {
+  if (!e || e.target === document.getElementById('icon-picker-modal')) {
+    document.getElementById('icon-picker-modal').style.display = 'none';
+    iconPickerIndex = -1;
+    // Reset upload input so the same file can be re-selected
+    const inp = document.getElementById('icon-upload-input');
+    if (inp) inp.value = '';
+    const status = document.getElementById('icon-upload-status');
+    if (status) { status.style.display = 'none'; status.textContent = ''; }
+  }
+}
+
+async function handleIconUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const status = document.getElementById('icon-upload-status');
+  const setStatus = (msg, color = 'var(--gray-600)') => {
+    status.style.display = 'block';
+    status.style.color = color;
+    status.textContent = msg;
+  };
+
+  setStatus(`⏳ Uploading "${file.name}"…`);
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const filename    = encodeURIComponent(file.name);
+    const res = await fetch(
+      `${API_BASE}/media/displayIcons/user/me/upload?autoConvert=true&filename=${filename}`,
+      {
+        method:  'POST',
+        headers: {
+          'Authorization': `Bearer ${state.token}`,
+          'Content-Type':  file.type || 'application/octet-stream',
+        },
+        body: arrayBuffer,
+      }
+    );
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+
+    const icon = data.displayIcon;
+    if (!icon?.mediaId) throw new Error('No mediaId in response');
+
+    // Add to the front of the user icons list (tag as user icon)
+    const newIcon = { ...icon, _userIcon: true, title: file.name.replace(/\.[^.]+$/, '') };
+    // Avoid duplicates
+    state.publicIcons = state.publicIcons.filter(i => i.mediaId !== icon.mediaId);
+    state.publicIcons.unshift(newIcon);
+    state.iconLookup[icon.mediaId] = icon.url || iconSrc(`yoto:#${icon.mediaId}`);
+
+    setStatus(`✅ "${newIcon.title}" uploaded!`, 'var(--green)');
+
+    // Refresh the grid and auto-select the new icon
+    document.getElementById('icon-picker-search').value = '';
+    renderIconPickerGrid('');
+    // Scroll the grid to the top so the new icon is visible
+    document.getElementById('icon-picker-grid').scrollTop = 0;
+
+    // Auto-select it for the current track
+    selectIcon(icon.mediaId);
+
+  } catch (err) {
+    setStatus(`❌ Upload failed: ${err.message}`, 'var(--red)');
+    console.error('Icon upload error:', err);
+  }
+
+  // Reset file input
+  input.value = '';
+}
+
+/* ════════════════════════════════════════════
+   CARD GRID
+════════════════════════════════════════════ */
+function renderCardGrid() {
+  const cards = state.cards;
+  const grid = document.getElementById('card-grid');
+
+  if (!cards.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="icon">📭</div><p>No cards here yet.</p></div>`;
+    return;
+  }
+
+  const selectedId = state.selectedCard?.id || state.selectedCard?.cardId;
+
+  grid.innerHTML = cards.map(card => {
+    const id    = card.id || card.cardId;
+    const title = card.title || card.metadata?.title || 'Untitled Card';
+    // chapters only present after individual fetch; fall back to '—' if unknown
+    const chapters = card.content?.chapters;
+    const trackMeta = chapters != null
+      ? `${chapters.length} track${chapters.length !== 1 ? 's' : ''}`
+      : '—';
+    // BUG-01 fix: actual field is metadata.cover.imageL
+    const img = card.metadata?.cover?.imageL;
+
+    return `
+      <div class="yoto-card${selectedId === id ? ' selected' : ''}" onclick="selectCard('${escHtml(id)}')">
+        <div class="card-art">
+          ${img ? `<img src="${escHtml(img)}" alt="${escHtml(title)}" loading="lazy" />` : getCardEmoji(title)}
+        </div>
+        <div class="card-title">${escHtml(title)}</div>
+        <div class="card-meta">${trackMeta}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function getCardEmoji(title) {
+  const t = title.toLowerCase();
+  if (t.includes('mix') || t.includes('music') || t.includes('song')) return '🎵';
+  if (t.includes('story') || t.includes('stories') || t.includes('tale')) return '📖';
+  if (t.includes('paw') || t.includes('patrol')) return '🐾';
+  if (t.includes('bluey')) return '🐕';
+  if (t.includes('cars') || t.includes('truck')) return '🚗';
+  if (t.includes('moana')) return '🌊';
+  if (t.includes('hobbit') || t.includes('tolkien')) return '🧙';
+  if (t.includes('seuss')) return '🎩';
+  if (t.includes('halloween')) return '🎃';
+  if (t.includes('christmas')) return '🎄';
+  return '🎧';
+}
+
+/* ════════════════════════════════════════════
+   CARD DETAIL
+════════════════════════════════════════════ */
+async function selectCard(cardId) {
+  const card = state.cards.find(c => (c.id || c.cardId) === cardId);
+  if (!card) return;
+
+  state.selectedCard = card;
+  // Track the most recent click so an in-flight fetch from a previous click
+  // can detect that it's been superseded and bail out before clobbering state.
+  const requestId = ++state._selectCardSeq;
+
+  // The list endpoint (/content/mine) doesn't include chapters —
+  // fetch the full card to get them.
+  showLoading('Loading card…');
+  let fetchFailed = false;
+  try {
+    const full = await api(`/content/${cardId}`);
+    if (requestId !== state._selectCardSeq) return;  // user clicked another card
+    state.selectedCard = full.card || full;
+  } catch (e) {
+    if (requestId !== state._selectCardSeq) return;
+    fetchFailed = true;
+    showToast('Could not load card details: ' + e.message, 'error');
+    // Fall through with whatever list-level data we have
+  }
+  hideLoading();
+  if (requestId !== state._selectCardSeq) return;
+  state.pendingTracks = [...(state.selectedCard.content?.chapters || [])];
+
+  // Cache chapter count back onto the list card so the grid can show it
+  // (only when the fetch actually returned chapters — otherwise we'd cache
+  // the empty fallback and break the grid's track count display)
+  const listCard = state.cards.find(c => (c.id || c.cardId) === cardId);
+  if (!fetchFailed && listCard && state.selectedCard.content?.chapters) {
+    if (!listCard.content) listCard.content = {};
+    listCard.content.chapters = state.selectedCard.content.chapters;
+  }
+
+  // Re-render grid to update selected highlight + track count
+  renderCardGrid();
+
+  // Show detail panel — use state.selectedCard (freshly fetched) not stale list card
+  document.getElementById('detail-empty').style.display = 'none';
+  const dc = document.getElementById('detail-content');
+  dc.style.display = 'flex';
+
+  // BUG-04 fix: use state.selectedCard, BUG-01 fix: correct cover field
+  const sc = state.selectedCard;
+  const title = sc.title || sc.metadata?.title || 'Untitled Card';
+  const img   = sc.metadata?.cover?.imageL;
+  const trackCount = state.pendingTracks.length;
+
+  // Art
+  const artEl = document.getElementById('detail-art');
+  if (img) {
+    artEl.innerHTML = `<img src="${escHtml(img)}" alt="${escHtml(title)}" />`;
+  } else {
+    artEl.innerHTML = getCardEmoji(title);
+  }
+
+  document.getElementById('detail-title').textContent = title;
+  document.getElementById('detail-subtitle').textContent =
+    `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
+
+  renderTrackList();
+}
+
+function renderTrackList() {
+  const container = document.getElementById('tracks-container');
+  const tracks = state.pendingTracks;
+
+  if (!tracks.length) {
+    container.innerHTML = '<p style="color:var(--gray-400); font-size:14px; padding:16px 0;">No tracks yet. Add some!</p>';
+    return;
+  }
+
+  container.innerHTML = tracks.map((t, i) => {
+    const title = t.title || t.key || `Track ${i + 1}`;
+    const duration = t.duration ? formatDuration(t.duration) : '';
+    return `
+      <div class="track-item" draggable="true" data-index="${i}">
+        <span class="track-num">${i + 1}</span>
+        ${trackIconHtml(t, i)}
+        <div class="track-info">
+          <div class="track-name">${escHtml(title)}</div>
+          ${duration ? `<div class="track-duration">${duration}</div>` : ''}
+        </div>
+        <button class="track-remove" onclick="removeTrack(${i})" title="Remove track">✕</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function removeTrack(index) {
+  state.pendingTracks.splice(index, 1);
+  renderTrackList();
+  document.getElementById('save-btn').style.display = 'flex';
+  updateDetailSubtitle();
+}
+
+function updateDetailSubtitle() {
+  const trackCount = state.pendingTracks.length;
+  document.getElementById('detail-subtitle').textContent =
+    `${trackCount} track${trackCount !== 1 ? 's' : ''}`;
+}
+
+// Convert a hex SHA256 (64 chars) to a yoto:# trackUrl (correct format).
+function hexSha256ToTrackUrl(hex) {
+  const bytes = new Uint8Array(hex.match(/.{2}/g).map(h => parseInt(h, 16)));
+  const b64   = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return 'yoto:#' + b64;
+}
+
+// Clean up chapters before POSTing to Yoto:
+//   - Strip invalid icon16x16 values (must be "yoto:#<43chars>")
+//   - Convert old hex SHA256 trackUrls to the correct yoto:# format
+// Returns { chapters, warnings } where warnings is a list of human-readable issues found.
+function sanitiseChapters(chapters) {
+  const VALID_ICON    = /^yoto:#.{43}$/;
+  const HEX_SHA256    = /^[0-9a-f]{64}$/i;
+  const warnings      = [];
+
+  const sanitised = chapters.map(ch => {
+    const clean = { ...ch };
+
+    // Fix invalid top-level icon
+    if (clean.icon16x16 !== undefined && !VALID_ICON.test(clean.icon16x16)) {
+      delete clean.icon16x16;
+    }
+    // Fix invalid icon inside display sub-object
+    if (clean.display?.icon16x16 !== undefined && !VALID_ICON.test(clean.display.icon16x16)) {
+      clean.display = { ...clean.display };
+      delete clean.display.icon16x16;
+    }
+
+    // Convert hex SHA256 trackUrls to yoto:# format (uploaded before the format fix)
+    if (clean.tracks) {
+      clean.tracks = clean.tracks.map(t => {
+        if (t.trackUrl && HEX_SHA256.test(t.trackUrl)) {
+          warnings.push(`Converted legacy trackUrl for "${t.title || ch.title}"`);
+          return { ...t, trackUrl: hexSha256ToTrackUrl(t.trackUrl) };
+        }
+        return t;
+      });
+    }
+
+    return clean;
+  });
+
+  return { chapters: sanitised, warnings };
+}
+
+async function saveTrackChanges(_attempt = 0) {
+  if (!state.selectedCard) return;
+  const cardId = state.selectedCard.id || state.selectedCard.cardId;
+  showLoading('Saving changes…');
+  try {
+    const { chapters: cleanChapters, warnings } = sanitiseChapters(state.pendingTracks);
+
+    // Spread the full existing metadata so artwork / description / etc. are preserved.
+    // Only the title field is ours to set; everything else stays as-is from Yoto.
+    const fullMetadata = {
+      ...(state.selectedCard.metadata || {}),
+      title: state.selectedCard.title || state.selectedCard.metadata?.title,
+    };
+
+    await api('/content', 'POST', {
+      cardId,
+      content:  { chapters: cleanChapters },
+      metadata: fullMetadata,
+    });
+
+    if (warnings.length) {
+      showToast(`⚠️ ${warnings.join('; ')}`, 'warning');
+    }
+
+    // Update local state
+    const idx = state.cards.findIndex(c => (c.id || c.cardId) === cardId);
+    if (idx >= 0) {
+      if (!state.cards[idx].content) state.cards[idx].content = {};
+      state.cards[idx].content.chapters = [...cleanChapters];
+      // Preserve the full fetched card so subsequent saves still have all metadata
+      state.cards[idx].metadata = fullMetadata;
+      state.selectedCard = { ...state.selectedCard, metadata: fullMetadata, content: { chapters: [...cleanChapters] } };
+    }
+    hideLoading();
+    document.getElementById('save-btn').style.display = 'none';
+    showToast('Changes saved!', 'success');
+    updateCounts();
+    renderCardGrid();
+  } catch (err) {
+    hideLoading();
+    // "Media file not found" = a chapter's trackUrl points to a file Yoto never stored.
+    // Offer to drop that chapter so the rest of the playlist can save.
+    // Cap retries so a stream of broken tracks can't trap the user in a dialog loop.
+    const MAX_RETRY = 10;
+    if (err.message.includes('Media file not found') && _attempt < MAX_RETRY) {
+      // Extract the track title from the JSON body embedded in err.message.
+      // Fall back to a generic label if parsing fails for any reason.
+      let badLabel = 'an unplayable track';
+      let badTitle = null;
+      try {
+        const jsonStr = err.message.slice(err.message.indexOf('{'));
+        const parsed  = JSON.parse(jsonStr);
+        const apiMsg  = parsed?.error?.message || '';
+        const hit     = apiMsg.match(/The track "([^"]+)"/);
+        if (hit) { badTitle = hit[1]; badLabel = `"${hit[1]}"`; }
+      } catch (_) { /* ignore — use generic label */ }
+
+      const confirmed = confirm(
+        `${badLabel} references a media file that Yoto can't find.\n\n` +
+        `This usually means the file was not uploaded successfully.\n\n` +
+        `Remove it from the playlist and save the rest?`
+      );
+      if (confirmed) {
+        state.pendingTracks = state.pendingTracks.filter(ch =>
+          !(ch.title === badTitle ||
+            ch.tracks?.some(t => t.title === badTitle))
+        );
+        renderTrackList();
+        saveTrackChanges(_attempt + 1);   // retry with the offending chapter removed
+      }
+    } else if (err.message.includes('Media file not found')) {
+      showToast('Too many broken tracks to clean up automatically — please review the playlist manually.', 'error');
+    } else {
+      showToast(err.message, 'error');
+    }
+  }
+}
+
+async function deleteSelectedCard() {
+  if (!state.selectedCard) return;
+  const title = state.selectedCard.title || state.selectedCard.metadata?.title || 'this card';
+  if (!confirm(`Are you sure you want to delete "${title}"? This cannot be undone.`)) return;
+
+  const cardId = state.selectedCard.id || state.selectedCard.cardId;
+  showLoading('Deleting card…');
+  try {
+    await api(`/content/${cardId}`, 'DELETE');
+    state.cards = state.cards.filter(c => (c.id || c.cardId) !== cardId);
+    state.selectedCard = null;
+    hideLoading();
+    showToast('Card deleted.', 'success');
+    updateCounts();
+    renderCardGrid();
+    showDetailEmpty();
+  } catch (err) {
+    hideLoading();
+    showToast(err.message, 'error');
+  }
+}
+
+/* ════════════════════════════════════════════
+   UPLOAD MODAL
+════════════════════════════════════════════ */
+
+function isYouTubeUrl(s) {
+  return /^https?:\/\/(www\.|music\.)?youtube\.com\/watch\?/.test(s) ||
+         /^https?:\/\/youtu\.be\//.test(s) ||
+         /^https?:\/\/youtube\.com\/watch\?/.test(s);
+}
+
+function resetDropZone() {
+  const dz = document.getElementById('drop-zone');
+  if (!dz) return;
+  dz.innerHTML = `
+    <div class="drop-icon">🎵</div>
+    <p><strong>Click to browse</strong> or drag &amp; drop</p>
+    <p style="margin-top:4px; font-size:12px; color:#9ca3af;">MP3, M4A, AAC, WAV, FLAC · or drag a YouTube URL</p>
+  `;
+  dz.onclick = () => document.getElementById('file-input').click();
+}
+
+async function handleYouTubeDrop(url) {
+  if (!state.selectedCard) {
+    showToast('Select a card first.', 'error');
+    return;
+  }
+  const dz = document.getElementById('drop-zone');
+  dz.onclick = null;
+  dz.innerHTML = `<div class="drop-icon">🎬</div><p>Fetching title…</p>`;
+
+  let title, duration;
+  try {
+    const res  = await fetch(`/local/yt-info?url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Failed to fetch video info');
+    title    = data.title;
+    duration = data.duration;
+  } catch (e) {
+    dz.innerHTML = `<div class="drop-icon" style="font-size:28px;">❌</div>
+      <p style="color:var(--red); font-size:13px;">${escHtml(e.message)}</p>`;
+    setTimeout(resetDropZone, 5000);
+    return;
+  }
+
+  const cardName = state.selectedCard?.title || state.selectedCard?.metadata?.title || 'this card';
+  dz.innerHTML = `
+    <div class="drop-icon">🎬</div>
+    <p style="font-weight:600; font-size:14px; margin-bottom:4px; line-height:1.3;">${escHtml(title)}</p>
+    ${duration ? `<p style="font-size:12px; color:var(--gray-400); margin-bottom:10px;">${escHtml(duration)}</p>` : ''}
+    <p style="margin-bottom:12px; font-size:13px; color:var(--gray-600);">Add to <strong>${escHtml(cardName)}</strong>?</p>
+    <div style="display:flex; gap:8px; justify-content:center;">
+      <button class="btn btn-primary btn-sm" id="yt-confirm-btn" style="width:auto;">Add Track</button>
+      <button class="btn btn-ghost btn-sm" id="yt-cancel-btn" style="width:auto;">Cancel</button>
+    </div>
+  `;
+  dz.onclick = null;
+
+  document.getElementById('yt-cancel-btn').onclick = resetDropZone;
+  document.getElementById('yt-confirm-btn').onclick = async () => {
+    const cardId = state.selectedCard?.id || state.selectedCard?.cardId;
+    if (!cardId) { resetDropZone(); return; }
+    dz.innerHTML = `<div class="drop-icon">⏳</div><p>Downloading &amp; uploading…</p>`;
+    try {
+      const res  = await fetch('/local/yt-upload', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ url, title, card_id: cardId }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Upload failed');
+      dz.innerHTML = `<div class="drop-icon">✅</div><p>Added to card!</p>`;
+      setTimeout(() => { resetDropZone(); selectCard(cardId); }, 3000);
+    } catch (e) {
+      dz.innerHTML = `<div class="drop-icon" style="font-size:28px;">❌</div>
+        <p style="color:var(--red); font-size:13px;">${escHtml(e.message)}</p>`;
+      setTimeout(resetDropZone, 5000);
+    }
+  };
+}
+
+// Set up drag-and-drop once at module load so repeated openUploadModal calls
+// don't accumulate duplicate event listeners on the drop zone.
+(function _initDropZone() {
+  const dz = document.getElementById('drop-zone');
+  if (!dz) return; // guard against script running before DOM (shouldn't happen with DOMContentLoaded)
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+      return;
+    }
+    const url = (e.dataTransfer.getData('text/uri-list') ||
+                 e.dataTransfer.getData('text/plain') || '').trim();
+    if (isYouTubeUrl(url)) {
+      handleYouTubeDrop(url);
+    }
+  });
+})();
+
+function openUploadModal() {
+  state.filesToUpload = [];
+  document.getElementById('file-queue').innerHTML = '';
+  resetDropZone();
+  document.getElementById('upload-modal').style.display = 'flex';
+  const title = state.selectedCard?.title || state.selectedCard?.metadata?.title || 'this card';
+  document.getElementById('upload-modal-subtitle').textContent = `Add audio tracks to "${title}".`;
+}
+
+function closeUploadModal(e) {
+  if (!e || e.target === document.getElementById('upload-modal')) {
+    document.getElementById('upload-modal').style.display = 'none';
+  }
+}
+
+function handleFiles(fileList) {
+  for (const f of fileList) {
+    if (!state.filesToUpload.find(x => x.name === f.name)) {
+      state.filesToUpload.push(f);
+    }
+  }
+  renderFileQueue();
+}
+
+function renderFileQueue() {
+  const queue = document.getElementById('file-queue');
+  queue.innerHTML = state.filesToUpload.map((f, i) => `
+    <div class="file-queue-item">
+      <span>🎵</span>
+      <span class="fname">${escHtml(f.name)}</span>
+      <span class="fsize">${formatBytes(f.size)}</span>
+      <button class="fremove" onclick="removeFromQueue(${i})">✕</button>
+    </div>
+  `).join('');
+}
+
+function removeFromQueue(i) {
+  state.filesToUpload.splice(i, 1);
+  renderFileQueue();
+}
+
+async function uploadTracks() {
+  if (!state.filesToUpload.length) {
+    showToast('No files selected.', 'error');
+    return;
+  }
+  if (!state.selectedCard) return;
+
+  const btn = document.getElementById('upload-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Uploading…';
+
+  const cardId = state.selectedCard.id || state.selectedCard.cardId;
+  let uploaded = 0;
+
+  for (const file of state.filesToUpload) {
+    try {
+      // Step 1: Get a fresh upload slot from Yoto (no sha256 param per API docs)
+      const uploadResp = await api(`/media/transcode/audio/uploadUrl?filename=${encodeURIComponent(file.name)}`);
+      const uploadReq  = uploadResp.upload || uploadResp;
+      if (!uploadReq.uploadUrl) throw new Error('Yoto API returned no uploadUrl');
+      if (!uploadReq.uploadId)  throw new Error('Yoto API returned no uploadId');
+
+      // Step 2: PUT file to S3
+      const s3Resp = await fetch(uploadReq.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type':        file.type || 'audio/mpeg',
+          'Content-Disposition': `attachment; filename="${file.name}"`,
+        },
+        body: file,
+      });
+      if (!s3Resp.ok) throw new Error(`S3 upload failed: ${s3Resp.status}`);
+
+      // Step 3: Poll until Yoto finishes transcoding (up to 30 × 500 ms = 15 s)
+      btn.innerHTML = '<span class="spinner"></span> Transcoding…';
+      let transcoded = null;
+      for (let i = 0; i < 30; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, 500));
+        const poll = await api(`/media/upload/${uploadReq.uploadId}/transcoded?loudnorm=false`);
+        if (poll.transcodedSha256) { transcoded = poll; break; }
+      }
+      btn.innerHTML = '<span class="spinner"></span> Uploading…';
+      if (!transcoded) throw new Error('Transcoding did not complete after 30 polls');
+
+      // Step 4: Build trackUrl from transcodedSha256; include transcodedInfo fields
+      const trackUrl  = 'yoto:#' + transcoded.transcodedSha256;
+      const info      = transcoded.transcodedInfo || {};
+      const trackName = file.name.replace(/\.[^.]+$/, '').replace(/^\d+[-_\s]+/, '').trim();
+      const chapterIndex = state.pendingTracks.length;
+      const chapterKey   = String(chapterIndex).padStart(2, '0');
+      state.pendingTracks.push({
+        key:          chapterKey,
+        title:        trackName,
+        overlayLabel: String(chapterIndex + 1),
+        tracks: [{
+          key:      chapterKey + '1',
+          title:    trackName,
+          type:     'audio',
+          trackUrl,
+          ...(info.duration != null && { duration: info.duration }),
+          ...(info.fileSize != null && { fileSize: info.fileSize }),
+          ...(info.channels != null && { channels: info.channels }),
+          ...(info.format   != null && { format:   info.format }),
+        }],
+      });
+
+      uploaded++;
+    } catch (err) {
+      showToast(`Failed to upload ${file.name}: ${err.message}`, 'error');
+    }
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = 'Upload Tracks';
+  closeUploadModal();
+
+  if (uploaded > 0) {
+    renderTrackList();
+    updateDetailSubtitle();
+    document.getElementById('save-btn').style.display = 'flex';
+    showToast(`${uploaded} track${uploaded > 1 ? 's' : ''} added. Don't forget to save!`, 'success');
+  }
+}
+
+/* ════════════════════════════════════════════
+   UI HELPERS
+════════════════════════════════════════════ */
+/* ════════════════════════════════════════════
+   QUEUE PANEL
+════════════════════════════════════════════ */
+
+async function openQueuePanel() {
+  document.getElementById('queue-modal').style.display = 'flex';
+  await loadQueueItems();
+}
+
+function closeQueuePanel(e) {
+  if (!e || e.target === document.getElementById('queue-modal')) {
+    document.getElementById('queue-modal').style.display = 'none';
+  }
+}
+
+async function loadQueueItems() {
+  const body = document.getElementById('queue-panel-body');
+  body.innerHTML = '<p style="color:var(--gray-400);text-align:center;padding:32px 0;">Loading…</p>';
+  try {
+    const res = await fetch('/local/queue');
+    const items = await res.json();
+    renderQueueItems(items);
+    updateQueueBadge(items.length);
+  } catch (e) {
+    body.innerHTML = `<p style="color:var(--red);text-align:center;padding:32px 0;">Failed to load queue: ${escHtml(e.message)}</p>`;
+  }
+}
+
+function updateQueueBadge(count) {
+  const badge = document.getElementById('queue-badge');
+  if (count > 0) {
+    badge.textContent = count;
+    badge.style.display = 'block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function renderQueueItems(items) {
+  const body = document.getElementById('queue-panel-body');
+  if (!items || !items.length) {
+    body.innerHTML = `
+      <div class="queue-empty">
+        <div class="icon">✅</div>
+        <p>Nothing here — all caught up!</p>
+      </div>`;
+    return;
+  }
+
+  const reasonLabel = {
+    user_saved:     'Saved by you',
+    no_match:       'No playlist match',
+    upload_failed:  'Upload failed',
+  };
+
+  body.innerHTML = items.map(item => {
+    const reason    = item.reason || 'user_saved';
+    const label     = reasonLabel[reason] || reason;
+    const trackName = escHtml(item.track_name || '—');
+    const filePath  = escHtml(item.file_path  || '—');
+    const rawMsg    = escHtml(item.raw_message || '—');
+    const rejected  = (item.rejected_candidates || []).map(escHtml);
+    const ts        = item.added_at
+                      ? new Date(item.added_at).toLocaleString()
+                      : '—';
+
+    return `
+      <div class="queue-item" id="qi-${escHtml(item.id)}">
+        <div class="queue-item-header">
+          <div class="queue-item-title">${trackName}</div>
+          <span class="queue-reason ${escHtml(reason)}">${label}</span>
+        </div>
+
+        <div class="queue-field">
+          <div class="queue-field-label">Original message</div>
+          <div class="queue-field-value plain">${rawMsg}</div>
+        </div>
+
+        <div class="queue-field">
+          <div class="queue-field-label">File path</div>
+          <div class="queue-field-value">${filePath}</div>
+        </div>
+
+        ${rejected.length ? `
+        <div class="queue-field">
+          <div class="queue-field-label">Playlists presented / rejected</div>
+          <div class="queue-field-value plain">${rejected.join(', ')}</div>
+        </div>` : ''}
+
+        <div class="queue-item-footer">
+          <span class="queue-timestamp">📅 ${ts}</span>
+          <button class="queue-clear-btn" onclick="clearQueueItem('${escHtml(item.id)}')">
+            ✓ Clear
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function clearQueueItem(id) {
+  try {
+    await fetch(`/local/queue/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const el = document.getElementById(`qi-${id}`);
+    if (el) el.remove();
+    // recount remaining items
+    const remaining = document.querySelectorAll('.queue-item').length;
+    updateQueueBadge(remaining);
+    if (remaining === 0) {
+      document.getElementById('queue-panel-body').innerHTML = `
+        <div class="queue-empty">
+          <div class="icon">✅</div>
+          <p>Nothing here — all caught up!</p>
+        </div>`;
+    }
+  } catch (e) {
+    showToast('Failed to clear item: ' + e.message, 'error');
+  }
+}
+
+/* ════════════════════════════════════════════
+   SETTINGS PANEL
+════════════════════════════════════════════ */
+
+let _settingsBackupMode = 'organized';
+
+async function openSettingsPanel() {
+  document.getElementById('settings-modal').style.display = 'flex';
+  await loadSettings();
+}
+
+function closeSettingsPanel(e) {
+  if (!e || e.target === document.getElementById('settings-modal')) {
+    document.getElementById('settings-modal').style.display = 'none';
+  }
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch('/local/config');
+    const cfg = await res.json();
+
+    // Section A: Telegram Bot
+    const hasToken = !!(cfg.telegram_bot_token);
+    const hasGroup = !!(cfg.allowed_group_id);
+    const configured = hasToken && hasGroup;
+
+    const statusEl = document.getElementById('settings-bot-status');
+    const statusText = document.getElementById('settings-bot-status-text');
+    statusEl.className = 'settings-status ' + (configured ? 'running' : 'unconfigured');
+    statusText.textContent = configured ? 'Running' : 'Not configured';
+
+    document.getElementById('settings-bot-token').textContent =
+      cfg.masked_token || '—';
+    document.getElementById('settings-bot-group').textContent =
+      cfg.allowed_group_id ? String(cfg.allowed_group_id) : '—';
+
+    // Section B: Local Backup
+    const backup = cfg.backup || {};
+    document.getElementById('backup-enabled').checked = !!backup.enabled;
+    if (backup.path) document.getElementById('backup-path').value = backup.path;
+    setBackupMode(backup.mode || 'organized');
+    onBackupToggle(); // apply disabled state
+  } catch (e) {
+    console.warn('loadSettings failed:', e);
+  }
+}
+
+function onBackupToggle() {
+  const enabled = document.getElementById('backup-enabled').checked;
+  document.getElementById('backup-path').disabled = !enabled;
+  document.getElementById('backup-path-row').style.opacity = enabled ? '1' : '0.45';
+  document.getElementById('backup-mode-row').style.opacity = enabled ? '1' : '0.45';
+  document.getElementById('backup-mode-hint').style.opacity = enabled ? '1' : '0.45';
+}
+
+function setBackupMode(mode) {
+  _settingsBackupMode = mode;
+  document.getElementById('mode-organized').classList.toggle('active', mode === 'organized');
+  document.getElementById('mode-flat').classList.toggle('active', mode === 'flat');
+  const hint = document.getElementById('backup-mode-hint');
+  if (mode === 'organized') {
+    hint.innerHTML = 'Saves to <code style="font-size:11px;">&lt;path&gt;/&lt;playlist name&gt;/&lt;filename&gt;</code>';
+  } else {
+    hint.innerHTML = 'Saves to <code style="font-size:11px;">&lt;path&gt;/&lt;filename&gt;</code>';
+  }
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('settings-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const payload = {
+      backup: {
+        enabled: document.getElementById('backup-enabled').checked,
+        path:    document.getElementById('backup-path').value.trim() || '/Users/haddonfisher/Dropbox/Yoto Cards',
+        mode:    _settingsBackupMode,
+      }
+    };
+    const res = await fetch('/local/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast('Settings saved!', 'success');
+  } catch (e) {
+    showToast('Failed to save settings: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+// Poll queue count in the background so the badge stays current
+async function refreshQueueBadge() {
+  try {
+    const res   = await fetch('/local/queue');
+    const items = await res.json();
+    updateQueueBadge(items.length);
+  } catch (_) { /* silent */ }
+}
+
+let _queuePollInterval = null;
+function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  refreshQueueBadge();
+  // Keep badge live — poll every 30s (guard so re-entering showApp doesn't stack intervals)
+  if (!_queuePollInterval) {
+    _queuePollInterval = setInterval(refreshQueueBadge, 30_000);
+  }
+}
+
+function showDetailEmpty() {
+  document.getElementById('detail-empty').style.display = 'flex';
+  document.getElementById('detail-content').style.display = 'none';
+}
+
+let loadingEl = null;
+function showLoading(msg = 'Loading…') {
+  if (loadingEl) return;
+  loadingEl = document.createElement('div');
+  loadingEl.className = 'loading-overlay';
+  loadingEl.innerHTML = `<div class="spinner-dark"></div><span style="font-size:15px;font-weight:600;color:var(--gray-600)">${msg}</span>`;
+  document.body.appendChild(loadingEl);
+}
+
+function hideLoading() {
+  if (loadingEl) { loadingEl.remove(); loadingEl = null; }
+}
+
+let toastTimeout = null;
+function showToast(msg, type = '') {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  if (toastTimeout) clearTimeout(toastTimeout);
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  toastTimeout = setTimeout(() => el.remove(), 4000);
+}
+
+function showAuthError(msg) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideAuthError() {
+  document.getElementById('auth-error').style.display = 'none';
+}
+
+function escHtml(str) {
+  // Also escape ' so values interpolated into single-quoted JS strings inside
+  // HTML attributes (e.g. onclick="fn('${escHtml(x)}')") cannot break out.
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function formatDuration(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+  return (b / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+/* ════════════════════════════════════════════
+   SERVER HEARTBEAT + RELOAD DETECTION
+════════════════════════════════════════════ */
+(function () {
+  // Tell the server this tab is alive every 5 seconds.
+  async function sendHeartbeat() {
+    try { await fetch('/local/tab-heartbeat', { method: 'POST' }); } catch (_) {}
+  }
+  sendHeartbeat();
+  setInterval(sendHeartbeat, 5000);
+  // Flush immediately when the tab is brought back into view (Chrome throttles
+  // background setInterval to ~1 min, so without this the file goes stale).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') sendHeartbeat();
+  });
+
+  // Watch for server going down/coming back up.
+  let serverWasDown = false;
+  async function checkPing() {
+    try {
+      const res = await fetch('/local/ping');
+      if (!res.ok) throw new Error('not ok');
+      if (serverWasDown) location.reload();
+    } catch (_) {
+      if (!serverWasDown) {
+        serverWasDown = true;
+        document.getElementById('reloading-screen').style.display = 'flex';
+      }
+    }
+  }
+  setInterval(checkPing, 2000);
+}());
+</script>
+</body>
+</html>
