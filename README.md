@@ -1,8 +1,22 @@
 # Yoto Manager
 
-A local dashboard and Telegram bot for managing your Yoto card playlists — add songs and audio from YouTube without touching a laptop.
+**Yoto Manager** is a local web dashboard and Telegram bot for managing your children's [Yoto](https://yotoplay.com) audio player cards. It runs entirely on your Mac — no cloud account needed beyond Yoto and Telegram themselves.
 
-> **How it works:** You run a small Python server on your Mac. It opens a web dashboard in your browser and starts a Telegram bot. From Telegram, you (or anyone in your family group) can search for a song, pick a result, and it gets downloaded and uploaded to a Yoto playlist — all in a few taps.
+With Yoto Manager you can:
+
+- **Search Apple Music** for a song and add it straight to a Yoto card playlist — from your phone, via Telegram
+- **Download from YouTube** — paste a URL or search by name; the audio is downloaded, converted, and uploaded automatically
+- **Upload your own audio files** through the web dashboard (great for audiobooks, homemade recordings, or anything you already have)
+- **Manage card playlists** — create new playlists, browse tracks, and organise your cards from a clean local web interface
+- **Control everything from Telegram** — you (or anyone in your family group) can add songs in a few taps without opening a laptop
+
+It works by running a small Python HTTP server on your Mac. That server powers the web dashboard at `http://localhost:8765` and keeps the Telegram bot running in the background.
+
+> **Who is this for?** Parents who want an easy way to keep Yoto cards fresh without manually dragging files around. Once it's set up, adding a new song to a card is just a Telegram message.
+
+---
+
+> **How it works in practice:** Open Telegram, type `/find Hey Jude`, pick the result you want, choose which Yoto card it goes on, and you're done — the bot handles the download and upload while you get on with your day.
 
 ---
 
