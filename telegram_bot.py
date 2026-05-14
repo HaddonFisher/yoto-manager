@@ -382,6 +382,39 @@ def _process_job(job: dict) -> None:
                 '❌ No Yoto token — open the dashboard and log in first.')
         return
 
+    # Apple Music tracks that still need to be downloaded first
+    am_pending_tracks = job.get('am_pending_tracks', [])
+    for t in am_pending_tracks:
+        title        = t.get('title', '')
+        _CLOUD_ONLY  = {'matched', 'purchased', 'uploaded', 'subscription'}
+        cloud_status = t.get('cloud_status', '')
+        if cloud_status in _CLOUD_ONLY:
+            tg_send(bot_token, chat_id, f'☁️ Downloading *{title}* from iTunes Match…')
+        else:
+            tg_send(bot_token, chat_id, f'⬇️ Getting *{title}* from Music library…')
+        path = am_download(t['id'], title=title, artist=t.get('artist', ''))
+        if not path:
+            tg_send(bot_token, chat_id,
+                    f'⚠️ *{title}* — download timed out, skipping')
+            continue
+        try:
+            local_path = am_copy_to_temp(path, title, t.get('artist', ''))
+        except Exception as e:
+            tg_send(bot_token, chat_id, f'❌ Could not copy *{title}*: `{e}`')
+            continue
+        tg_send(bot_token, chat_id, f'⏳ Uploading *{title}* → *{playlist}*…')
+        ok, err = _upload_core(local_path, title, card, token)
+        if ok:
+            record_recent_playlist(card.get('cardId') or card.get('id', ''), playlist)
+            backup_track(local_path, title, playlist)
+            if err:
+                tg_send(bot_token, chat_id, err)
+            tg_send(bot_token, chat_id, f'✅ *{title}* → *{playlist}*')
+            log_activity(f'job upload ok  track={title!r}  playlist={playlist!r}')
+        else:
+            log_error(f'job upload fail  track={title!r}  playlist={playlist!r}  err={err}')
+            tg_send(bot_token, chat_id, f'❌ *{title}* failed: `{err[:200]}`')
+
     # Apple Music pre-downloaded tracks (file_path already available)
     am_tracks = job.get('am_tracks', [])
     for item in am_tracks:
@@ -638,7 +671,8 @@ def _prompt_create_playlist(bot_token: str, chat_id: int, from_uid: int,
                               msg_id: int, suggested: str,
                               file_path: Optional[str], track_name: Optional[str],
                               raw_message: str, yt_tracks: list = None,
-                              am_tracks: list = None) -> None:
+                              am_tracks: list = None,
+                              am_pending_tracks: list = None) -> None:
     """Ask the user to type a playlist name."""
     prompt = (
         f'What should the new playlist be called?\n'
@@ -651,7 +685,8 @@ def _prompt_create_playlist(bot_token: str, chat_id: int, from_uid: int,
                   type='create_name',
                   suggested=suggested,
                   yt_tracks=yt_tracks or [],
-                  am_tracks=am_tracks or [])
+                  am_tracks=am_tracks or [],
+                  am_pending_tracks=am_pending_tracks or [])
 
 
 def _handle_create_name_reply(bot_token: str, chat_id: int, from_uid: int,
@@ -661,23 +696,26 @@ def _handle_create_name_reply(bot_token: str, chat_id: int, from_uid: int,
     name = text.strip()
     if not name:
         return  # stay silent
-    file_path  = pending.get('file_path') or None
-    track_name = pending.get('track_name') or None
-    raw_msg    = pending.get('raw_message', '')
-    yt_tracks  = pending.get('yt_tracks') or []
-    am_tracks  = pending.get('am_tracks') or []
+    file_path         = pending.get('file_path') or None
+    track_name        = pending.get('track_name') or None
+    raw_msg           = pending.get('raw_message', '')
+    yt_tracks         = pending.get('yt_tracks') or []
+    am_tracks         = pending.get('am_tracks') or []
+    am_pending_tracks = pending.get('am_pending_tracks') or []
     del pending_matches[key]
     _save_pending()
     _do_create_playlist(bot_token, chat_id, msg_id, name,
                         file_path=file_path, track_name=track_name,
                         raw_message=raw_msg, yt_tracks=yt_tracks,
-                        am_tracks=am_tracks, from_uid=from_uid)
+                        am_tracks=am_tracks, am_pending_tracks=am_pending_tracks,
+                        from_uid=from_uid)
 
 
 def _do_create_playlist(bot_token: str, chat_id: int, msg_id: int,
                          name: str, file_path: Optional[str],
                          track_name: Optional[str], raw_message: str,
                          yt_tracks: list = None, am_tracks: list = None,
+                         am_pending_tracks: list = None,
                          from_uid: int = 0) -> None:
     """Call the Yoto API to create the playlist, then upload if a file/batch is queued."""
     log_activity(f'create_playlist  name={name!r}')
@@ -694,6 +732,15 @@ def _do_create_playlist(bot_token: str, chat_id: int, msg_id: int,
             _JOB_QUEUE.put({
                 'bot_token': bot_token, 'chat_id': chat_id,
                 'tracks': yt_tracks, 'card': card, 'raw_message': raw_message,
+            })
+            tg_send(bot_token, chat_id,
+                    f'✅ Queued {n} track{"s" if n > 1 else ""} → *{name}*\n'
+                    f'_(Download & upload running in background)_')
+        elif am_pending_tracks:
+            n = len(am_pending_tracks)
+            _JOB_QUEUE.put({
+                'bot_token': bot_token, 'chat_id': chat_id,
+                'am_pending_tracks': am_pending_tracks, 'card': card, 'raw_message': raw_message,
             })
             tg_send(bot_token, chat_id,
                     f'✅ Queued {n} track{"s" if n > 1 else ""} → *{name}*\n'
@@ -999,11 +1046,12 @@ def _handle_playlist_choose_reply(bot_token: str, chat_id: int, from_uid: int,
                     'it may have been deleted. Try searching.',
                     reply_to=msg_id)
             return
-        file_path  = pending['file_path']
-        track_name = pending['track_name']
-        raw_msg    = pending.get('raw_message', '')
-        yt_tracks  = pending.get('yt_tracks')
-        am_tracks  = pending.get('am_tracks')
+        file_path         = pending['file_path']
+        track_name        = pending['track_name']
+        raw_msg           = pending.get('raw_message', '')
+        yt_tracks         = pending.get('yt_tracks')
+        am_tracks         = pending.get('am_tracks')
+        am_pending_tracks = pending.get('am_pending_tracks')
         del pending_matches[key]
         _save_pending()
         if yt_tracks:
@@ -1011,6 +1059,15 @@ def _handle_playlist_choose_reply(bot_token: str, chat_id: int, from_uid: int,
             _JOB_QUEUE.put({
                 'bot_token': bot_token, 'chat_id': chat_id,
                 'tracks': yt_tracks, 'card': card, 'raw_message': raw_msg,
+            })
+            tg_send(bot_token, chat_id,
+                    f'✅ Queued {n} track{"s" if n > 1 else ""} → *{card_title(card)}*\n'
+                    f'_(Download & upload running in background)_')
+        elif am_pending_tracks:
+            n = len(am_pending_tracks)
+            _JOB_QUEUE.put({
+                'bot_token': bot_token, 'chat_id': chat_id,
+                'am_pending_tracks': am_pending_tracks, 'card': card, 'raw_message': raw_msg,
             })
             tg_send(bot_token, chat_id,
                     f'✅ Queued {n} track{"s" if n > 1 else ""} → *{card_title(card)}*\n'
@@ -1041,17 +1098,19 @@ def _handle_playlist_choose_reply(bot_token: str, chat_id: int, from_uid: int,
         return
 
     if cleaned == 'create':
-        file_path  = pending['file_path']
-        track_name = pending['track_name']
-        raw_msg    = pending.get('raw_message', '')
-        yt_tracks  = pending.get('yt_tracks')
-        am_tracks  = pending.get('am_tracks')
+        file_path         = pending['file_path']
+        track_name        = pending['track_name']
+        raw_msg           = pending.get('raw_message', '')
+        yt_tracks         = pending.get('yt_tracks')
+        am_tracks         = pending.get('am_tracks')
+        am_pending_tracks = pending.get('am_pending_tracks')
         del pending_matches[key]
         _save_pending()
         _prompt_create_playlist(bot_token, chat_id, from_uid, msg_id,
                                 '', file_path, track_name, raw_msg,
                                 yt_tracks=yt_tracks or [],
-                                am_tracks=am_tracks or [])
+                                am_tracks=am_tracks or [],
+                                am_pending_tracks=am_pending_tracks or [])
         return
 
     if cleaned == 'pick':
@@ -1069,12 +1128,13 @@ def _handle_playlist_choose_reply(bot_token: str, chat_id: int, from_uid: int,
         idx       = int(cleaned) - 1
         all_cards = pending.get('candidates', [])
         if 0 <= idx < len(all_cards):
-            card       = all_cards[idx]
-            file_path  = pending['file_path']
-            track_name = pending['track_name']
-            raw_msg    = pending.get('raw_message', '')
-            yt_tracks  = pending.get('yt_tracks')
-            am_tracks  = pending.get('am_tracks')
+            card              = all_cards[idx]
+            file_path         = pending['file_path']
+            track_name        = pending['track_name']
+            raw_msg           = pending.get('raw_message', '')
+            yt_tracks         = pending.get('yt_tracks')
+            am_tracks         = pending.get('am_tracks')
+            am_pending_tracks = pending.get('am_pending_tracks')
             del pending_matches[key]
             _save_pending()
             if yt_tracks:
@@ -1082,6 +1142,15 @@ def _handle_playlist_choose_reply(bot_token: str, chat_id: int, from_uid: int,
                 _JOB_QUEUE.put({
                     'bot_token': bot_token, 'chat_id': chat_id,
                     'tracks': yt_tracks, 'card': card, 'raw_message': raw_msg,
+                })
+                tg_send(bot_token, chat_id,
+                        f'✅ Queued {n} track{"s" if n > 1 else ""} → *{card_title(card)}*\n'
+                        f'_(Download & upload running in background)_')
+            elif am_pending_tracks:
+                n = len(am_pending_tracks)
+                _JOB_QUEUE.put({
+                    'bot_token': bot_token, 'chat_id': chat_id,
+                    'am_pending_tracks': am_pending_tracks, 'card': card, 'raw_message': raw_msg,
                 })
                 tg_send(bot_token, chat_id,
                         f'✅ Queued {n} track{"s" if n > 1 else ""} → *{card_title(card)}*\n'
@@ -1972,7 +2041,7 @@ def _am_get_location(track_id: str, verbose: bool = False) -> Optional[str]:
     try:
         tid = int(track_id)
     except (TypeError, ValueError):
-        print(f'  am_location: invalid track_id {track_id!r}')
+        _activity_logger.info(f'am_location: invalid track_id {track_id!r}')
         return None
     # Ask for both location and iCloud status in one call so we can log both
     script = (
@@ -2002,12 +2071,12 @@ def _am_get_location(track_id: str, verbose: bool = False) -> Optional[str]:
         path = parts[1].strip() if len(parts) > 1 else ''
         if verbose:
             exists = Path(path).exists() if path else False
-            print(f'  am_location [{track_id}]: cloud={cloud_status!r} path={path!r} exists={exists} stderr={stderr!r}')
+            _activity_logger.info(f'am_location [{track_id}]: cloud={cloud_status!r} path={path!r} exists={exists} stderr={stderr!r}')
         if path and Path(path).exists():
             return path
         return None
     except Exception as e:
-        print(f'  am_location error: {e}')
+        _activity_logger.info(f'am_location error: {e}')
         return None
 
 
@@ -2026,9 +2095,9 @@ def _am_stop_and_unmute() -> None:
     try:
         subprocess.run(['osascript', '-e', script],
                        capture_output=True, text=True, timeout=10)
-        print('  am_download: stopped Music and restored volume')
+        _activity_logger.info('am_download: stopped Music and restored volume')
     except Exception as e:
-        print(f'  am_stop_and_unmute error: {e}')
+        _activity_logger.info(f'am_stop_and_unmute error: {e}')
 
 
 def _am_cloud_status(track_id: str) -> str:
@@ -2069,19 +2138,38 @@ def _am_glob_file(title: str, artist: str = '') -> Optional[str]:
     if not safe_title:
         return None
     safe_artist = re.sub(r'[^\w\s]', '', artist).strip()[:40] if artist else ''
-    print(f'  am_glob_file: searching {search_root} for {safe_title!r} ({safe_artist!r})')
-    for ext in ('m4a', 'm4p', 'mp3', 'aac'):
-        hits = list(search_root.glob(f'**/*{safe_title}*.{ext}'))
-        if hits:
-            if safe_artist:
-                artist_hits = [h for h in hits
-                               if safe_artist.lower() in str(h).lower()]
-                if artist_hits:
-                    print(f'  am_glob_file: artist match → {artist_hits[0]}')
-                    return str(artist_hits[0])
-            print(f'  am_glob_file: title match → {hits[0]}')
-            return str(hits[0])
-    print(f'  am_glob_file: no match found for {safe_title!r}')
+
+    # Build progressively shorter title variants: full name → separator prefix → first word.
+    # Needed because Music.app track names often include extra words not in the filename
+    # (e.g. "Dela I Think I Know Why…" → filename is just "Dela.m4a").
+    title_variants: list[str] = [safe_title]
+    for sep in (' - ', ' (', ': '):
+        if sep in safe_title:
+            shorter = safe_title.split(sep)[0].strip()
+            if shorter and shorter not in title_variants:
+                title_variants.append(shorter)
+    first_word = safe_title.split()[0] if safe_title.split() else ''
+    if first_word and first_word not in title_variants:
+        title_variants.append(first_word)
+
+    _activity_logger.info(f'am_glob_file: searching {search_root} for {title_variants!r} ({safe_artist!r})')
+
+    def _best_hit(hits: list) -> Optional[str]:
+        if safe_artist:
+            artist_hits = [h for h in hits if safe_artist.lower() in str(h).lower()]
+            if artist_hits:
+                return str(artist_hits[0])
+        return str(hits[0]) if hits else None
+
+    for variant in title_variants:
+        for ext in ('m4a', 'm4p', 'mp3', 'aac'):
+            hits = list(search_root.glob(f'**/*{variant}*.{ext}'))
+            hit = _best_hit(hits)
+            if hit:
+                _activity_logger.info(f'am_glob_file: match via variant {variant!r} → {hit}')
+                return hit
+
+    _activity_logger.info(f'am_glob_file: no match found for {title_variants!r}')
     return None
 
 
@@ -2097,7 +2185,7 @@ def am_download(track_id: str, title: str = '', artist: str = '') -> Optional[st
     try:
         tid = int(track_id)
     except (TypeError, ValueError):
-        print(f'  am_download: invalid track_id {track_id!r}')
+        _activity_logger.info(f'am_download: invalid track_id {track_id!r}')
         return None
 
     # Step 1 — check if already local, collect metadata, trigger download.
@@ -2144,15 +2232,15 @@ def am_download(track_id: str, title: str = '', artist: str = '') -> Optional[st
                            capture_output=True, text=True, timeout=30)
         raw = r.stdout.strip()
         stderr = r.stderr.strip()
-        print(f'  am_download trigger [{track_id}]: raw={raw!r} stderr={stderr!r}')
+        _activity_logger.info(f'am_download trigger [{track_id}]: raw={raw!r} stderr={stderr!r}')
         parts = raw.split('|||')
         status_token = parts[0] if parts else ''
         if status_token == 'local':
             loc = parts[1] if len(parts) > 1 else ''
             if loc and Path(loc).exists():
-                print(f'  am_download [{track_id}]: already local → {loc}')
+                _activity_logger.info(f'am_download [{track_id}]: already local → {loc}')
                 return loc
-            print(f'  am_download [{track_id}]: location returned but file absent, polling…')
+            _activity_logger.info(f'am_download [{track_id}]: location returned but file absent, polling…')
         elif status_token == 'downloading':
             initial_cloud = parts[1] if len(parts) > 1 else 'unknown'
             if not title and len(parts) > 2:
@@ -2160,18 +2248,18 @@ def am_download(track_id: str, title: str = '', artist: str = '') -> Optional[st
             if not artist and len(parts) > 3:
                 artist = parts[3]
             trigger_method = parts[4] if len(parts) > 4 else 'unknown'
-            print(f'  am_download [{track_id}]: triggered via {trigger_method!r}, '
-                  f'cloud={initial_cloud!r} title={title!r} artist={artist!r}')
+            _activity_logger.info(f'am_download [{track_id}]: triggered via {trigger_method!r}, '
+                                  f'cloud={initial_cloud!r} title={title!r} artist={artist!r}')
         else:
-            print(f'  am_download [{track_id}]: unexpected trigger response {raw!r}, proceeding to poll')
+            _activity_logger.info(f'am_download [{track_id}]: unexpected trigger response {raw!r}, proceeding to poll')
     except Exception as e:
-        print(f'  am_download trigger error: {e}')
+        _activity_logger.info(f'am_download trigger error: {e}')
         return None
 
     # Step 2 — poll for up to 10 minutes.
     # Log before each sleep so the activity log shows trigger results immediately.
-    print(f'  am_download [{track_id}]: starting poll loop '
-          f'(title={title!r} artist={artist!r})…')
+    _activity_logger.info(f'am_download [{track_id}]: starting poll loop '
+                          f'(title={title!r} artist={artist!r})…')
     deadline = time.time() + 600
     poll = 0
     found_path = None
@@ -2180,24 +2268,41 @@ def am_download(track_id: str, title: str = '', artist: str = '') -> Optional[st
     while time.time() < deadline:
         poll += 1
         elapsed = (poll - 1) * 3
-        print(f'  am_download [{track_id}]: poll {poll} ({elapsed}s) — checking…')
+        _activity_logger.info(f'am_download [{track_id}]: poll {poll} ({elapsed}s) — checking…')
 
         loc_path = _am_get_location(track_id, verbose=True)
         last_loc_result = loc_path
         if loc_path:
-            print(f'  am_download [{track_id}]: Music.app location ready '
-                  f'after {elapsed}s → {loc_path}')
+            _activity_logger.info(f'am_download [{track_id}]: Music.app location ready '
+                                  f'after {elapsed}s → {loc_path}')
             found_path = loc_path
             break
 
         fs_path = _am_glob_file(title, artist)
         last_fs_result = fs_path
         if fs_path:
-            print(f'  am_download [{track_id}]: filesystem hit after {elapsed}s → {fs_path}')
+            _activity_logger.info(f'am_download [{track_id}]: filesystem hit after {elapsed}s → {fs_path}')
             found_path = fs_path
             break
 
-        print(f'  am_download [{track_id}]: poll {poll} ({elapsed}s): no file yet — sleeping 3s')
+        # Check iTunes Match temp folder so we know a download IS in flight even
+        # before Music.app moves the file to its final library location.
+        # Active downloads land at: ~/Music/Music/Media.localized/Downloads-Music/<Name>.tmp/download.m4a
+        if title:
+            _fw_parts = re.sub(r'[^\w\s]', '', title).strip().split()
+            _fw = _fw_parts[0] if _fw_parts else ''
+            if _fw:
+                _dl_dir = Path.home() / 'Music/Music/Media.localized/Downloads-Music'
+                if _dl_dir.exists():
+                    _tmp_dirs = [d for d in _dl_dir.iterdir()
+                                 if d.is_dir() and d.name.endswith('.tmp')
+                                 and _fw.lower() in d.name.lower()]
+                    if _tmp_dirs:
+                        _activity_logger.info(
+                            f'am_download [{track_id}]: temp folder detected '
+                            f'{_tmp_dirs[0].name!r} — download in progress, continuing to poll…')
+
+        _activity_logger.info(f'am_download [{track_id}]: poll {poll} ({elapsed}s): no file yet — sleeping 3s')
         if time.time() < deadline:
             time.sleep(3)
 
@@ -2209,11 +2314,11 @@ def am_download(track_id: str, title: str = '', artist: str = '') -> Optional[st
 
     # Timeout — emit diagnostic info so we can see exactly what Music.app and the
     # filesystem reported on the last poll
-    print(f'  am_download [{track_id}]: timed out after {poll} polls (~{(poll - 1) * 3}s)')
-    print(f'  am_download [{track_id}]: last _am_get_location={last_loc_result!r}')
-    print(f'  am_download [{track_id}]: last _am_glob_file={last_fs_result!r}')
+    _activity_logger.info(f'am_download [{track_id}]: timed out after {poll} polls (~{(poll - 1) * 3}s)')
+    _activity_logger.info(f'am_download [{track_id}]: last _am_get_location={last_loc_result!r}')
+    _activity_logger.info(f'am_download [{track_id}]: last _am_glob_file={last_fs_result!r}')
     sample = list((Path.home() / 'Music').rglob('*.m4a'))[:5]
-    print(f'  am_download [{track_id}]: ~/Music *.m4a sample: {[str(p) for p in sample]}')
+    _activity_logger.info(f'am_download [{track_id}]: ~/Music *.m4a sample: {[str(p) for p in sample]}')
     return None
 
 
@@ -3017,7 +3122,7 @@ def _handle_am_confirm_reply(bot_token: str, chat_id: int, from_uid: int,
     if cleaned == 'done_empty':
         return
 
-    # "Done" — download all selected tracks then transition to playlist picker
+    # "Done" — ask which card/playlist to add to (download deferred to job worker)
     if cleaned == 'done':
         if not selected:
             return
@@ -3026,35 +3131,6 @@ def _handle_am_confirm_reply(bot_token: str, chat_id: int, from_uid: int,
             return
         del pending_matches[key]
         _save_pending()
-        # Download each selected AM track now (blocking in polling thread — acceptable
-        # since am_download already handles its own timeout)
-        am_ready = []
-        for t in chosen:
-            _CLOUD_ONLY_STATUSES = {'matched', 'purchased', 'uploaded', 'subscription'}
-            cloud_status = t.get('cloud_status', '')
-            if cloud_status in _CLOUD_ONLY_STATUSES:
-                tg_send(bot_token, chat_id,
-                        f'☁️ Downloading *{t["title"]}* from iTunes Match…')
-            else:
-                tg_send(bot_token, chat_id,
-                        f'⬇️ Getting *{t["title"]}* from Music library…')
-            path = am_download(t['id'], title=t.get('title', ''), artist=t.get('artist', ''))
-            if not path:
-                tg_send(bot_token, chat_id,
-                        f'⚠️ *{t["title"]}* timed out — skipping (streaming-only track?)')
-                continue
-            try:
-                local_path = am_copy_to_temp(path, t['title'], t['artist'])
-            except Exception as e:
-                tg_send(bot_token, chat_id,
-                        f'❌ Could not copy *{t["title"]}*: `{e}`')
-                continue
-            am_ready.append({'file_path': local_path, 'title': t['title']})
-
-        if not am_ready:
-            tg_send(bot_token, chat_id,
-                    '❌ No tracks could be downloaded. Try YouTube instead.')
-            return
 
         try:
             cards = fetch_cards()
@@ -3066,23 +3142,23 @@ def _handle_am_confirm_reply(bot_token: str, chat_id: int, from_uid: int,
         if pl:
             card = find_card_exact(pl, cards)
             if card:
-                n = len(am_ready)
+                n = len(chosen)
                 _JOB_QUEUE.put({
                     'bot_token': bot_token, 'chat_id': chat_id,
-                    'tracks': [], 'am_tracks': am_ready, 'card': card, 'raw_message': raw,
+                    'am_pending_tracks': chosen, 'card': card, 'raw_message': raw,
                 })
                 tg_send(bot_token, chat_id,
                         f'✅ Queued {n} track{"s" if n > 1 else ""} → *{card_title(card)}*\n'
-                        f'_(Upload running in background)_')
+                        f'_(Download & upload running in background)_')
                 return
 
         # No playlist pre-specified — run through picker
         offer_fuzzy_matches(bot_token, chat_id, from_uid, msg_id,
-                            '', f'{len(am_ready)} track(s)', pl or '', cards,
+                            '', f'{len(chosen)} track(s)', pl or '', cards,
                             raw_message=raw)
         key2 = (chat_id, from_uid)
         if key2 in pending_matches:
-            pending_matches[key2]['am_tracks'] = am_ready
+            pending_matches[key2]['am_pending_tracks'] = chosen
             _save_pending()
         return
 
@@ -3191,9 +3267,7 @@ def _handle_am_confirm_reply(bot_token: str, chat_id: int, from_uid: int,
     path = am_download(track['id'], title=track.get('title', ''), artist=track.get('artist', ''))
     if not path:
         tg_send(bot_token, chat_id,
-                '⚠️ Download timed out — this track may be streaming-only '
-                '(Apple Music subscription track, not a matched/purchased file). '
-                'Falling back to YouTube…')
+                '⚠️ Download timed out for this track. Falling back to YouTube…')
         _do_youtube_search(bot_token, chat_id, from_uid, msg_id,
                            f'{track["title"]} {track["artist"]}', pl, raw)
         return
