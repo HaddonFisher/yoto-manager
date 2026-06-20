@@ -9,6 +9,7 @@ Routes:
   everything else → static files in this directory
 """
 
+import base64
 import http.server
 import urllib.request
 import urllib.error
@@ -361,6 +362,42 @@ class YotoHandler(http.server.SimpleHTTPRequestHandler):
                     self._send_json_response(200, json.dumps({'ok': False, 'error': err}).encode())
             except Exception as e:
                 self._send_json_response(200, json.dumps({'ok': False, 'error': str(e)}).encode())
+            return True
+
+        # ── /local/backup-cover ───────────────────────────────────
+        if path == '/local/backup-cover' and self.command == 'POST':
+            if not self._local_auth_ok(require_origin=True): return True
+            body = self._read_body_capped()
+            if body is None: return True
+            try:
+                payload    = json.loads(body)
+                card_title = payload.get('card_title', 'Unknown')
+                image_b64  = payload.get('image_data', '')
+                if not image_b64:
+                    self._send_json_response(400, b'{"error":"image_data required"}')
+                    return True
+                if not BOT_CONFIG_FILE.exists():
+                    self._send_json_response(200, b'{"ok":false,"reason":"not configured"}')
+                    return True
+                cfg        = json.loads(BOT_CONFIG_FILE.read_text())
+                backup_cfg = cfg.get('backup', {})
+                if not backup_cfg.get('enabled'):
+                    self._send_json_response(200, b'{"ok":false,"reason":"backup disabled"}')
+                    return True
+                backup_path = backup_cfg.get('path', '')
+                if not backup_path:
+                    self._send_json_response(200, b'{"ok":false,"reason":"no backup path"}')
+                    return True
+                mode     = backup_cfg.get('mode', 'organized')
+                safe_dir = re.sub(r'[<>:"/\\|?*]', '-', card_title).strip()
+                dest_dir = Path(backup_path) / safe_dir if mode == 'organized' else Path(backup_path)
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest_file = dest_dir / 'cover.jpg'
+                dest_file.write_bytes(base64.b64decode(image_b64))
+                print(f'  💾 cover art backup: {dest_file}')
+                self._send_json_response(200, b'{"ok":true}')
+            except Exception as e:
+                self._send_json_response(500, json.dumps({'error': str(e)}).encode())
             return True
 
         return False  # not a local route

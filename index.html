@@ -414,6 +414,41 @@
       object-fit: cover;
     }
 
+    /* ── COVER ART UPLOAD ── */
+    .cover-upload-wrapper {
+      position: relative;
+      width: 80px;
+      height: 80px;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .cover-upload-wrapper .detail-art {
+      width: 100%;
+      height: 100%;
+      margin-bottom: 0;
+      border-radius: 0;
+    }
+    .cover-upload-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.52);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.2s;
+      font-size: 10px;
+      font-weight: 700;
+      color: white;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+    .cover-upload-wrapper:hover .cover-upload-overlay { opacity: 1; }
+
     .detail-title {
       font-size: 17px;
       font-weight: 700;
@@ -1063,7 +1098,11 @@
       </div>
       <div id="detail-content" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
         <div class="detail-header">
-          <div class="detail-art" id="detail-art">🎵</div>
+          <div class="cover-upload-wrapper" onclick="document.getElementById('cover-upload-input').click()" title="Change cover art">
+            <div class="detail-art" id="detail-art">🎵</div>
+            <div class="cover-upload-overlay">📷 Change</div>
+          </div>
+          <input type="file" id="cover-upload-input" accept="image/*" style="display:none;" onchange="handleCoverUpload(this)" />
           <div class="detail-title" id="detail-title">—</div>
           <div class="detail-subtitle" id="detail-subtitle">—</div>
           <div class="detail-actions">
@@ -1838,6 +1877,129 @@ async function handleIconUpload(input) {
 
   // Reset file input
   input.value = '';
+}
+
+/* ════════════════════════════════════════════
+   COVER ART UPLOAD
+════════════════════════════════════════════ */
+async function handleCoverUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (!state.selectedCard) { showToast('Select a card first.', 'error'); return; }
+
+  const artEl = document.getElementById('detail-art');
+  const prevContent = artEl.innerHTML;
+  artEl.innerHTML = '<div class="spinner-dark" style="width:32px;height:32px;margin:auto;"></div>';
+
+  try {
+    // Resize + centre-crop to 500×500 JPEG client-side
+    const jpegBlob = await resizeToSquareJpeg(file, 500);
+
+    // Upload to Yoto via the display-icon endpoint (the only publicly documented
+    // image-upload path; autoConvert=true lets Yoto handle further re-encoding).
+    const arrayBuffer = await jpegBlob.arrayBuffer();
+    const res = await fetch(
+      `${API_BASE}/media/displayIcons/user/me/upload?autoConvert=true&filename=cover.jpg`,
+      {
+        method:  'POST',
+        headers: {
+          'Authorization': `Bearer ${state.token}`,
+          'Content-Type':  'image/jpeg',
+        },
+        body: arrayBuffer,
+      }
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+
+    const coverUrl = data.displayIcon?.url;
+    if (!coverUrl) throw new Error('No URL in upload response');
+
+    // Persist cover URL in card metadata (re-sends existing chapters so nothing is lost)
+    await saveCoverArtToCard(coverUrl);
+
+    // Backup to local folder (best-effort — never blocks success)
+    const cardTitle = state.selectedCard.title || state.selectedCard.metadata?.title || 'Unknown';
+    backupCoverArt(jpegBlob, cardTitle).catch(() => {});
+
+    // Update detail-art element
+    artEl.innerHTML = `<img src="${escHtml(coverUrl)}" alt="Cover art" />`;
+
+    // Sync the URL back into the list card so the grid thumbnail updates too
+    const cardId  = state.selectedCard.id || state.selectedCard.cardId;
+    const listCard = state.cards.find(c => (c.id || c.cardId) === cardId);
+    if (listCard) {
+      if (!listCard.metadata) listCard.metadata = {};
+      if (!listCard.metadata.cover) listCard.metadata.cover = {};
+      listCard.metadata.cover.imageL = coverUrl;
+    }
+    renderCardGrid();
+    showToast('Cover art updated!', 'success');
+
+  } catch (err) {
+    artEl.innerHTML = prevContent;
+    showToast('Cover upload failed: ' + err.message, 'error');
+    console.error('Cover upload error:', err);
+  }
+
+  input.value = '';
+}
+
+function resizeToSquareJpeg(file, size) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const blobUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(blobUrl);
+      // Centre-crop to the largest square that fits inside the source image
+      const s  = Math.min(img.naturalWidth, img.naturalHeight);
+      const sx = (img.naturalWidth  - s) / 2;
+      const sy = (img.naturalHeight - s) / 2;
+      const canvas = document.createElement('canvas');
+      canvas.width  = size;
+      canvas.height = size;
+      canvas.getContext('2d').drawImage(img, sx, sy, s, s, 0, 0, size, size);
+      canvas.toBlob(
+        blob => blob ? resolve(blob) : reject(new Error('Image conversion failed')),
+        'image/jpeg', 0.92
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(blobUrl); reject(new Error('Could not load image')); };
+    img.src = blobUrl;
+  });
+}
+
+async function saveCoverArtToCard(coverUrl) {
+  const cardId      = state.selectedCard.id || state.selectedCard.cardId;
+  const { chapters } = sanitiseChapters(state.pendingTracks);
+  const newMetadata = {
+    ...(state.selectedCard.metadata || {}),
+    title: state.selectedCard.title || state.selectedCard.metadata?.title,
+    cover: {
+      ...(state.selectedCard.metadata?.cover || {}),
+      imageL: coverUrl,
+    },
+  };
+  await api('/content', 'POST', {
+    cardId,
+    content:  { chapters },
+    metadata: newMetadata,
+  });
+  state.selectedCard.metadata = newMetadata;
+}
+
+async function backupCoverArt(blob, cardTitle) {
+  const b64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('FileReader failed'));
+    reader.readAsDataURL(blob);
+  });
+  await fetch('/local/backup-cover', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ card_title: cardTitle, image_data: b64 }),
+  });
 }
 
 /* ════════════════════════════════════════════
