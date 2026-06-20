@@ -10,6 +10,7 @@ Routes:
 """
 
 import base64
+import datetime
 import http.server
 import urllib.request
 import urllib.error
@@ -79,6 +80,13 @@ except ImportError as _e:
 
 PORT = 8765
 
+# Process start time, recorded at import — used by the /health endpoint.
+START_TIME = time.time()
+# Set in __main__ once bot config is loaded; lets /health distinguish a bot
+# that is disabled (no/invalid config) from one that crashed (config OK but
+# thread dead).
+BOT_ENABLED = None
+
 TOKEN_FILE      = Path('yoto_token.json')
 BOT_CONFIG_FILE = Path('bot_config.json')
 QUEUE_FILE      = Path('queue.json')
@@ -98,6 +106,8 @@ MAX_BODY_BYTES = 25 * 1024 * 1024
 class YotoHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
+        if self.path.split('?')[0] in ('/health', '/healthz'):
+            self._send_health(); return
         if self._try_local(): return
         if self._try_proxy(): return
         super().do_GET()
@@ -410,6 +420,37 @@ class YotoHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # ── /health ────────────────────────────────────────────────
+    def _send_health(self):
+        """Liveness signal: confirms the HTTP loop is responsive and reports
+        whether the Telegram bot thread is still alive. Localhost-only, matching
+        the security posture of the other local endpoints. Cheap and side-effect
+        free — safe to poll frequently."""
+        if self.client_address[0] not in ('127.0.0.1', '::1'):
+            self.send_error(403, 'Health endpoint is localhost-only')
+            return
+        bot_alive = any(
+            t.name == 'telegram-bot' and t.is_alive() for t in threading.enumerate()
+        )
+        if bot_alive:
+            bot = 'running'
+        elif BOT_ENABLED:
+            bot = 'stopped'
+        else:
+            bot = 'disabled'
+        now = time.time()
+        payload = {
+            'service': 'yoto-manager',
+            'status': 'ok',
+            'pid': os.getpid(),
+            'port': self.server.server_address[1],
+            'started_at': datetime.datetime.fromtimestamp(START_TIME).isoformat(timespec='seconds'),
+            'uptime_seconds': round(now - START_TIME, 1),
+            'bot': bot,
+            'time': datetime.datetime.fromtimestamp(now).isoformat(timespec='seconds'),
+        }
+        self._send_json_response(200, json.dumps(payload).encode())
+
     # ── proxy ──────────────────────────────────────────────────
     def _try_proxy(self):
         for prefix, target in PROXY_ROUTES.items():
@@ -544,6 +585,7 @@ if __name__ == '__main__':
 
     # Load Telegram bot config
     bot_cfg = load_bot_config()
+    BOT_ENABLED = bot_cfg is not None
     if bot_cfg:
         print(f'🤖  Telegram bot enabled (group {bot_cfg["allowed_group_id"]})')
         bot_thread = threading.Thread(
