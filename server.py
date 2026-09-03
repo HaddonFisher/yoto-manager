@@ -565,8 +565,9 @@ def load_bot_config():
         return None
     try:
         cfg = json.loads(BOT_CONFIG_FILE.read_text())
-        if not cfg.get('telegram_bot_token') or not cfg.get('allowed_group_id'):
-            print('⚠️  bot_config.json is missing telegram_bot_token or allowed_group_id — bot disabled.')
+        has_dest = cfg.get('owner_chat_id') or cfg.get('allowed_user_ids')
+        if not cfg.get('telegram_bot_token') or not has_dest:
+            print('⚠️  bot_config.json is missing telegram_bot_token or owner_chat_id — bot disabled.')
             return None
         return cfg
     except Exception as e:
@@ -587,7 +588,8 @@ if __name__ == '__main__':
     bot_cfg = load_bot_config()
     BOT_ENABLED = bot_cfg is not None
     if bot_cfg:
-        print(f'🤖  Telegram bot enabled (group {bot_cfg["allowed_group_id"]})')
+        owner = bot_cfg.get('owner_chat_id') or (bot_cfg.get('allowed_user_ids') or [None])[0]
+        print(f'🤖  Telegram bot enabled (DM owner={owner})')
         bot_thread = threading.Thread(
             target=run_telegram_bot,
             args=(bot_cfg,),

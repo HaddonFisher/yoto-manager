@@ -1,4 +1,6 @@
 {
   "telegram_bot_token": "1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ",
-  "allowed_group_id": -987654321
+  "allowed_user_ids": [123456789],
+  "owner_chat_id": 123456789,
+  "allowed_send_chat_ids": [123456789]
 }

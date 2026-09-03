@@ -70,6 +70,21 @@ _JOB_QUEUE: _queue_module.Queue = _queue_module.Queue()
 _JOB_WORKER_STARTED = False
 _JOB_WORKER_LOCK = threading.Lock()
 
+# ── Outbound send allowlist ────────────────────────────────────────────────
+# Set of chat IDs the bot is permitted to send messages to.
+# Populated from config at startup by _init_allowed_sends().
+# If empty, all sends are permitted (fail-open; should not occur in production).
+_allowed_send_ids: set = set()
+
+
+def _init_allowed_sends(cfg: dict) -> None:
+    """Populate _allowed_send_ids from config.
+    Defaults to [owner_chat_id] when allowed_send_chat_ids is absent."""
+    global _allowed_send_ids
+    owner = cfg.get('owner_chat_id') or (cfg.get('allowed_user_ids') or [None])[0]
+    default = [owner] if owner else []
+    _allowed_send_ids = set(cfg.get('allowed_send_chat_ids', default))
+
 
 # ── Logging setup ─────────────────────────────────────────────────────────
 # Two independent loggers:
@@ -95,6 +110,10 @@ def _setup_logger(name: str, filepath: Path,
 
 _activity_logger: Optional[logging.Logger] = None
 _error_logger:    Optional[logging.Logger] = None
+
+# Debounce for Apple Music Automation-permission alerts (avoid flooding on repeated /find failures)
+_am_auth_alert_last_sent: float = 0.0
+_AM_AUTH_ALERT_COOLDOWN:  int   = 600   # seconds (10 min)
 
 
 def _init_loggers() -> None:
@@ -226,6 +245,9 @@ def tg_request(bot_token: str, method: str, payload: dict = None,
 def tg_send(bot_token: str, chat_id: int, text: str,
              reply_to: int = None, parse_mode: str = 'Markdown') -> None:
     """Send a Telegram message. Errors are printed but not raised."""
+    if _allowed_send_ids and chat_id not in _allowed_send_ids:
+        print(f'  🚫  tg_send: blocked outbound to unauthorized chat_id={chat_id}')
+        return
     payload = {'chat_id': chat_id, 'text': text, 'parse_mode': parse_mode}
     if reply_to:
         payload['reply_to_message_id'] = reply_to
@@ -237,6 +259,9 @@ def tg_send(bot_token: str, chat_id: int, text: str,
 
 def tg_react(bot_token: str, chat_id: int, msg_id: int, emoji: str = '👋') -> None:
     """Add an emoji reaction to a message. Silently ignores errors."""
+    if _allowed_send_ids and chat_id not in _allowed_send_ids:
+        print(f'  🚫  tg_react: blocked outbound to unauthorized chat_id={chat_id}')
+        return
     try:
         tg_request(bot_token, 'setMessageReaction', {
             'chat_id':   chat_id,
@@ -252,6 +277,9 @@ def tg_send_keyboard(bot_token: str, chat_id: int, text: str,
                      parse_mode: str = 'Markdown') -> None:
     """Send a message with an inline keyboard. buttons is a list of rows,
     each row is a list of (label, callback_data) tuples."""
+    if _allowed_send_ids and chat_id not in _allowed_send_ids:
+        print(f'  🚫  tg_send_keyboard: blocked outbound to unauthorized chat_id={chat_id}')
+        return
     keyboard = [
         [{'text': label, 'callback_data': data} for label, data in row]
         for row in buttons
@@ -274,6 +302,9 @@ def tg_edit_keyboard(bot_token: str, chat_id: int, message_id: int, buttons: lis
     """Edit the reply markup of an existing bot message in-place.
     buttons is the same format as tg_send_keyboard: list of rows,
     each row is a list of (label, callback_data) tuples."""
+    if _allowed_send_ids and chat_id not in _allowed_send_ids:
+        print(f'  🚫  tg_edit_keyboard: blocked outbound to unauthorized chat_id={chat_id}')
+        return
     keyboard = [
         [{'text': label, 'callback_data': data} for label, data in row]
         for row in buttons
@@ -294,6 +325,9 @@ def tg_edit_message(bot_token: str, chat_id: int, message_id: int,
                     text: str, buttons: list,
                     parse_mode: str = 'Markdown') -> None:
     """Edit the text and reply markup of an existing bot message in-place."""
+    if _allowed_send_ids and chat_id not in _allowed_send_ids:
+        print(f'  🚫  tg_edit_message: blocked outbound to unauthorized chat_id={chat_id}')
+        return
     keyboard = [
         [{'text': label, 'callback_data': data} for label, data in row]
         for row in buttons
@@ -314,6 +348,9 @@ def tg_send_keyboard_ret(bot_token: str, chat_id: int, text: str,
                           buttons: list, reply_to: int = None,
                           parse_mode: str = 'Markdown') -> Optional[int]:
     """Like tg_send_keyboard but returns the message_id of the sent message, or None."""
+    if _allowed_send_ids and chat_id not in _allowed_send_ids:
+        print(f'  🚫  tg_send_keyboard_ret: blocked outbound to unauthorized chat_id={chat_id}')
+        return None
     keyboard = [
         [{'text': label, 'callback_data': data} for label, data in row]
         for row in buttons
@@ -480,17 +517,19 @@ def run_telegram_bot(cfg: dict) -> None:
     Entry point for the daemon thread.
     Long-polls getUpdates and dispatches each message.
     """
-    bot_token       = cfg['telegram_bot_token']
-    allowed_group   = cfg['allowed_group_id']
-    offset          = _load_offset()
+    bot_token        = cfg['telegram_bot_token']
+    allowed_user_ids = set(cfg.get('allowed_user_ids', []))
+    owner_chat_id    = cfg.get('owner_chat_id') or (next(iter(allowed_user_ids), None))
+    _init_allowed_sends(cfg)
+    offset           = _load_offset()
 
     _init_loggers()
     _ensure_job_worker()
 
     # Restore any pending states that survived the restart
     pending_matches.update(_load_pending())
-    log_activity(f'Bot started. {len(pending_matches)} pending state(s) restored.')
-    print(f'  🤖  Telegram bot polling started… ({len(pending_matches)} pending state(s) restored)')
+    log_activity(f'Bot started (DM mode, owner={owner_chat_id}). {len(pending_matches)} pending state(s) restored.')
+    print(f'  🤖  Telegram bot polling started (DM owner={owner_chat_id})… ({len(pending_matches)} pending state(s) restored)')
 
     # If we were restarted via /restart, react to that message to signal we're back
     if RESTART_ACK_FILE.exists():
@@ -532,7 +571,11 @@ def run_telegram_bot(cfg: dict) -> None:
                     msg_id   = cq.get('message', {}).get('message_id')
                     data     = (cq.get('data') or '').strip()
 
-                    if chat_id != allowed_group:
+                    if allowed_user_ids and from_uid not in allowed_user_ids:
+                        tg_answer_callback(bot_token, cq_id)
+                        continue
+
+                    if owner_chat_id and chat_id != owner_chat_id:
                         tg_answer_callback(bot_token, cq_id)
                         continue
 
@@ -550,8 +593,12 @@ def run_telegram_bot(cfg: dict) -> None:
                 text     = (msg.get('text') or '').strip()
                 msg_id   = msg['message_id']
 
-                # ── Security: only allow the configured group ────────────
-                if chat_id != allowed_group:
+                # ── Security: reject unauthorized senders before any processing ──
+                if allowed_user_ids and from_uid not in allowed_user_ids:
+                    continue  # silently ignore
+
+                # ── Security: only allow the owner's DM chat ────────────
+                if owner_chat_id and chat_id != owner_chat_id:
                     continue  # silently ignore
 
                 # ── Normalise text ───────────────────────────────────────
@@ -1981,11 +2028,12 @@ def fuzzy_match_cards(query: str, cards: list, n: int = 3) -> list:
 
 # ── Apple Music helpers (macOS only, via osascript) ────────────────────────
 
-def am_search(query: str, offset: int = 0) -> list:
+def am_search(query: str, offset: int = 0):
     """
     Search the local Music library for tracks matching query.
-    Returns list of {id, title, artist, album}.  Requires macOS + Music app.
-    offset skips the first N results, allowing batched pagination beyond 40.
+    Returns list of {id, title, artist, album} on success (may be empty if no matches),
+    or None on osascript/Automation error (caller should alert and fall back).
+    Requires macOS + Music app.  offset skips the first N results (pagination).
     """
     safe = query.replace('"', "'").replace('\\', '').replace('\n', ' ')[:200]
     script = (
@@ -2015,8 +2063,15 @@ def am_search(query: str, offset: int = 0) -> list:
         r = subprocess.run(['osascript', '-e', script],
                            capture_output=True, text=True, timeout=15)
         if r.returncode != 0:
-            print(f'  am_search stderr: {r.stderr.strip()[:200]}')
-            return []
+            stderr_snip = r.stderr.strip()[:400]
+            is_auth = (
+                '-1743' in stderr_snip
+                or 'errAEEventNotPermitted' in stderr_snip
+                or 'not permitted' in stderr_snip.lower()
+            )
+            label = 'Automation permission denied (-1743)' if is_auth else 'osascript non-zero exit'
+            log_error(f'am_search {label} — query={query!r}  stderr={stderr_snip}')
+            return None
         tracks = []
         for line in r.stdout.strip().split('\n'):
             if not line.strip():
@@ -2031,9 +2086,16 @@ def am_search(query: str, offset: int = 0) -> list:
                     'cloud_status': parts[4].strip() if len(parts) > 4 else 'unknown',
                 })
         return tracks
+    except subprocess.TimeoutExpired:
+        log_error(
+            f'am_search timeout (>15s) — query={query!r}. '
+            'Music.app may be blocked on a TCC permission prompt (Automation consent). '
+            'Check System Settings → Privacy & Security → Automation.'
+        )
+        return None
     except Exception as e:
-        print(f'  am_search error: {e}')
-        return []
+        log_error(f'am_search error — query={query!r}: {e}')
+        return None
 
 
 def _am_get_location(track_id: str, verbose: bool = False) -> Optional[str]:
@@ -2558,6 +2620,33 @@ def handle_find_command(bot_token: str, chat_id: int, from_uid: int,
             f'🔍 Searching Apple Music for *{query}*…', reply_to=msg_id)
 
     tracks = am_search(query)
+    log_activity(f'am_search query={query!r} → {"error" if tracks is None else f"{len(tracks)} result(s)"}')
+
+    if tracks is None:
+        # osascript failed — likely macOS Automation permission denied (error -1743).
+        # Send an actionable alert, rate-limited to avoid spam on repeated /find failures.
+        global _am_auth_alert_last_sent
+        now = time.time()
+        if now - _am_auth_alert_last_sent >= _AM_AUTH_ALERT_COOLDOWN:
+            _am_auth_alert_last_sent = now
+            tg_send(bot_token, chat_id,
+                    '⚠️ *Apple Music automation denied*\n'
+                    "Yoto Manager couldn't reach your Music library — macOS blocked the "
+                    'Apple Events request (Automation permission, usually error -1743).\n\n'
+                    '*To fix:*\n'
+                    '1. Open *System Settings → Privacy & Security → Automation*\n'
+                    '2. Enable the *Music* checkbox under the Python entry\n'
+                    '3. If no Python entry appears, run this in Terminal first:\n'
+                    "`osascript -e 'tell application \"Music\" to name'`\n"
+                    '   then approve the permission prompt that appears.\n\n'
+                    f'Query: `{query}`\n'
+                    '_Falling back to YouTube…_')
+        else:
+            tg_send(bot_token, chat_id,
+                    f'⚠️ Apple Music still unreachable — trying YouTube for `{query}`…')
+        _do_youtube_search(bot_token, chat_id, from_uid, msg_id,
+                           query, playlist_name, text)
+        return
 
     _CLOUD_DISPLAY_STATUSES = {'matched', 'purchased', 'uploaded', 'subscription'}
     if tracks:
@@ -2589,7 +2678,7 @@ def handle_find_command(bot_token: str, chat_id: int, from_uid: int,
                       keyboard_msg_id=kbd_mid)
     else:
         tg_send(bot_token, chat_id,
-                f'🔍 Not in your Apple Music library — checking YouTube…')
+                f'🎵 Nothing in your Apple Music library for *{query}* — checking YouTube…')
         _do_youtube_search(bot_token, chat_id, from_uid, msg_id,
                            query, playlist_name, text)
 
