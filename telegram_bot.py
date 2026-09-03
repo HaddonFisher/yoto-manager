@@ -76,6 +76,15 @@ _JOB_WORKER_LOCK = threading.Lock()
 # If empty, all sends are permitted (fail-open; should not occur in production).
 _allowed_send_ids: set = set()
 
+# ── Apple Music step feature flag ──────────────────────────────────────────
+# Controls whether /find tries Apple Music (via osascript) before falling
+# back to YouTube. Set from config['apple_music_enabled'] at startup in
+# run_telegram_bot(). Defaults to True (existing behavior) when the key is
+# absent, so a config without this field keeps working unchanged — hosts
+# that can never satisfy it (no macOS/Music.app, e.g. FUBARS) should set it
+# to false explicitly in bot_config.json rather than rely on this default.
+_apple_music_enabled: bool = True
+
 
 def _init_allowed_sends(cfg: dict) -> None:
     """Populate _allowed_send_ids from config.
@@ -521,6 +530,8 @@ def run_telegram_bot(cfg: dict) -> None:
     allowed_user_ids = set(cfg.get('allowed_user_ids', []))
     owner_chat_id    = cfg.get('owner_chat_id') or (next(iter(allowed_user_ids), None))
     _init_allowed_sends(cfg)
+    global _apple_music_enabled
+    _apple_music_enabled = bool(cfg.get('apple_music_enabled', True))
     offset           = _load_offset()
 
     _init_loggers()
@@ -2616,6 +2627,13 @@ def handle_find_command(bot_token: str, chat_id: int, from_uid: int,
     query         = parts[0]
     playlist_name = parts[1] if len(parts) > 1 else None
 
+    if not _apple_music_enabled:
+        tg_send(bot_token, chat_id,
+                f'📺 Searching YouTube for *{query}*…', reply_to=msg_id)
+        _do_youtube_search(bot_token, chat_id, from_uid, msg_id,
+                           query, playlist_name, text)
+        return
+
     tg_send(bot_token, chat_id,
             f'🔍 Searching Apple Music for *{query}*…', reply_to=msg_id)
 
@@ -3253,6 +3271,9 @@ def _handle_am_confirm_reply(bot_token: str, chat_id: int, from_uid: int,
 
     # Fetch next 40 results from Apple Music
     if cleaned == 'amore:fetch':
+        if not _apple_music_enabled:
+            tg_send(bot_token, chat_id, '🔍 Apple Music search is disabled.')
+            return
         query      = pending.get('query', '')
         cur_offset = len(tracks)
         new_tracks = am_search(query, offset=cur_offset)
