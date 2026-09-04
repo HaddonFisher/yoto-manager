@@ -202,7 +202,28 @@ def _pending_key(chat_id: int, from_uid: int) -> str:
 
 
 def _load_pending() -> dict:
-    """Load pending states from disk, keyed by (chat_id, from_uid) tuples."""
+    """Load pending states from disk, keyed by (chat_id, from_uid) tuples.
+
+    TODO item 4: this used to fail completely silently on any corruption --
+    no log line, no console output, nothing -- and there's no locking on
+    PENDING_FILE (bot_pending.json), so a concurrent writer (a second
+    process touching the same file -- how this was actually noticed, while
+    testing) could corrupt it invisibly. Fail-safe behavior is unchanged:
+    still returns {} on any error rather than raising, since a lost pending
+    selection is a minor, self-expiring (PENDING_TTL) inconvenience, not
+    something worth crashing over. The only change is that it's now logged
+    instead of silently swallowed, matching what _save_pending() already
+    does on its own write failures.
+
+    Deliberately NOT adding file locking (fcntl.flock or similar): in
+    normal operation only this one process ever touches PENDING_FILE, so
+    the race that surfaced this doesn't occur in production -- it only
+    happened because a second, separate ad-hoc process was run against the
+    same file during testing (see git history). Real inter-process locking
+    would be the complete fix for that specific scenario, but it's real
+    complexity (lock acquisition, timeouts, blocking semantics) for a risk
+    that isn't present in how this service actually runs.
+    """
     if not PENDING_FILE.exists():
         return {}
     try:
@@ -214,7 +235,8 @@ def _load_pending() -> dict:
                 chat_id, from_uid = (int(x) for x in k.split(':'))
                 result[(chat_id, from_uid)] = v
         return result
-    except Exception:
+    except Exception as e:
+        log_error(f'_load_pending: could not read {PENDING_FILE} — starting with no pending state', exc=e)
         return {}
 
 
