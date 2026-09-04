@@ -91,6 +91,7 @@ TOKEN_FILE      = Path('yoto_token.json')
 BOT_CONFIG_FILE = Path('bot_config.json')
 QUEUE_FILE      = Path('queue.json')
 TAB_ALIVE_FILE  = Path('tab_alive.json')
+BACKUP_STATUS_FILE = Path('backup_status.json')  # TODO item 6
 
 PROXY_ROUTES = {
     '/yoto-auth/': 'https://login.yotoplay.com/',
@@ -212,6 +213,22 @@ class YotoHandler(http.server.SimpleHTTPRequestHandler):
                 if not self._local_auth_ok(require_origin=False): return True
                 queue = load_queue()
                 body = json.dumps(queue).encode()
+                self._send_json_response(200, body)
+                return True
+
+        # ── /local/backup-status ───────────────────────────────
+        # TODO item 6: last-successful-backup signal, written by
+        # backup_track()/_record_backup_success() in telegram_bot.py.
+        # Staleness of last_success_iso is the thing to watch for --
+        # this is the direct fix for the Dropbox backup path having
+        # failed silently, every time, for months with no visible sign.
+        if path == '/local/backup-status':
+            if self.command == 'GET':
+                if not self._local_auth_ok(require_origin=False): return True
+                if BACKUP_STATUS_FILE.exists():
+                    body = BACKUP_STATUS_FILE.read_bytes()
+                else:
+                    body = b'{"last_success_at": null, "note": "no successful backup recorded yet"}'
                 self._send_json_response(200, body)
                 return True
 

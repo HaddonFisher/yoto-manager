@@ -1070,6 +1070,7 @@
         <button class="refresh-btn" onclick="openQueuePanel()" title="Saved for later">📥 Queue</button>
         <span class="queue-badge" id="queue-badge">0</span>
       </div>
+      <span id="backup-status-indicator" style="font-size:12px;color:#888;margin-left:8px;" title="Last successful track backup"></span>
       <button class="refresh-btn" onclick="showTokenDebug()" title="Inspect JWT token claims" style="font-size:12px;">🔍 Debug token</button>
       <button class="refresh-btn" onclick="openSettingsPanel()" title="Settings">⚙️ Settings</button>
       <button class="logout-btn" onclick="logout()">Log out</button>
@@ -2760,11 +2761,40 @@ async function refreshQueueBadge() {
   } catch (_) { /* silent */ }
 }
 
+// TODO item 6: surface last-successful-backup staleness in the dashboard
+// itself, not just a log file nobody's watching -- direct fix for the
+// Dropbox backup path having failed silently, every time, for months.
+// One check on load is enough; this isn't something that needs live polling.
+async function refreshBackupStatus() {
+  const el = document.getElementById('backup-status-indicator');
+  if (!el) return;
+  try {
+    const res  = await fetch('/local/backup-status');
+    const data = await res.json();
+    if (!data.last_success_at) {
+      el.textContent = '💾 Backup: never';
+      el.style.color = '#c0392b';
+      return;
+    }
+    const ageMs   = Date.now() - data.last_success_at * 1000;
+    const ageDays = ageMs / 86_400_000;
+    const ageText = ageDays < 1
+      ? `${Math.max(1, Math.round(ageMs / 3_600_000))}h ago`
+      : `${Math.round(ageDays)}d ago`;
+    el.textContent = `💾 Backup: ${ageText}`;
+    // Flag it red once it's been quiet long enough to be suspicious --
+    // e.g. this is exactly the number of days it would have taken to
+    // notice the broken backup path months sooner than we actually did.
+    el.style.color = ageDays > 3 ? '#c0392b' : '#888';
+  } catch (_) { /* silent -- this is a nice-to-have indicator, not core function */ }
+}
+
 let _queuePollInterval = null;
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
   refreshQueueBadge();
+  refreshBackupStatus();
   // Keep badge live — poll every 30s (guard so re-entering showApp doesn't stack intervals)
   if (!_queuePollInterval) {
     _queuePollInterval = setInterval(refreshQueueBadge, 30_000);

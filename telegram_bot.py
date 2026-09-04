@@ -41,6 +41,7 @@ PENDING_FILE            = Path('bot_pending.json')
 RESTART_ACK_FILE        = Path('bot_restart_ack.json')
 RECENT_PLAYLISTS_FILE   = Path('recent_playlists.json')
 LAST_COMMAND_FILE       = Path('bot_last_command.json')
+BACKUP_STATUS_FILE      = Path('backup_status.json')  # TODO item 6: last-successful-backup signal
 ACTIVITY_LOG_FILE       = Path('yoto_activity.log')
 ERROR_LOG_FILE          = Path('yoto_errors.log')
 
@@ -1578,6 +1579,27 @@ def _dropbox_upload(token: str, local_path: str, dropbox_path: str) -> None:
         resp.read()
 
 
+def _record_backup_success(track_name: str, backend: str, dest: str) -> None:
+    """TODO item 6: write a small 'last successful backup' marker so a
+    failing-every-time backup path (the actual Dropbox bug this was
+    written after) is visible somewhere other than a log file nobody's
+    watching -- staleness of this timestamp is the signal. Same simple
+    small-JSON-file pattern already used for recent_playlists.json etc.,
+    no new infrastructure. Best-effort: failure to write this is not
+    worth failing the backup over, so it's logged, not raised.
+    """
+    try:
+        BACKUP_STATUS_FILE.write_text(json.dumps({
+            'last_success_at': time.time(),
+            'last_success_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'track': track_name,
+            'backend': backend,
+            'dest': dest,
+        }, indent=2))
+    except Exception as e:
+        log_error(f'_record_backup_success: could not write {BACKUP_STATUS_FILE}', exc=e)
+
+
 def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
     """Back up the source audio file (if configured) -- either a local copy,
     or a direct push to Dropbox via their API, per backup.backend.
@@ -1607,6 +1629,7 @@ def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
             dropbox_path = f'{base}/{_safe_dirname(playlist_title)}/{Path(file_path).name}'
             _dropbox_upload(token, file_path, dropbox_path)
             log_activity(f'backup (dropbox api)  track={track_name!r}  dest={dropbox_path!r}')
+            _record_backup_success(track_name, 'dropbox_api', dropbox_path)
             return
 
         # backend == 'local' (default / legacy)
@@ -1630,6 +1653,7 @@ def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
 
         shutil.copy2(file_path, dest_file)
         log_activity(f'backup  track={track_name!r}  dest={str(dest_file)!r}')
+        _record_backup_success(track_name, 'local', str(dest_file))
 
     except Exception as e:
         log_error(f'backup failed  track={track_name!r}', exc=e)
