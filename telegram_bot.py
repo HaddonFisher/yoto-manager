@@ -548,10 +548,23 @@ def _process_job(job: dict) -> None:
                     continue
 
                 tg_send(bot_token, chat_id, f'⏳ Uploading *{title}* → *{playlist}*…')
-                ok, err = _upload_core(file_path, title, card, token)
-                if not ok:
-                    time.sleep(5)
+                # TODO item 7: 3 attempts total with a short escalating
+                # backoff (5s, 10s), up from 2 attempts flat-5s. Deliberately
+                # not trying to distinguish retryable from non-retryable
+                # errors here (e.g. a real auth failure vs a network blip)
+                # -- doing that without solid evidence for what _upload_core's
+                # error strings actually look like across failure modes
+                # risked either giving up too early or retrying something
+                # that will never succeed. This is the safe version: it can
+                # only help (more chances before giving up), never changes
+                # the success path, and every upload observed this session
+                # succeeded on the first try regardless -- no evidence this
+                # path is a real problem, just cheap insurance.
+                for _attempt in range(3):
                     ok, err = _upload_core(file_path, title, card, token)
+                    if ok or _attempt == 2:
+                        break
+                    time.sleep(5 if _attempt == 0 else 10)
                 if ok:
                     record_recent_playlist(card.get('cardId') or card.get('id', ''), playlist)
                     backup_track(file_path, title, playlist)
@@ -560,7 +573,7 @@ def _process_job(job: dict) -> None:
                     tg_send(bot_token, chat_id, f'✅ *{title}* → *{playlist}*')
                     log_activity(f'job upload ok  track={title!r}  playlist={playlist!r}')
                 else:
-                    log_error(f'job upload fail (2 attempts)  track={title!r}  err={err}')
+                    log_error(f'job upload fail (3 attempts)  track={title!r}  err={err}')
                     tg_send(bot_token, chat_id,
                             f'❌ *{title}* failed: `{err[:200]}`')
 
@@ -2014,13 +2027,16 @@ def _do_yt_batch_upload(bot_token: str, chat_id: int, card: dict,
 
             # ── Upload — sequential within this batch; cross-thread same-card
             #    safety is provided by _CONTENT_LOCK inside _upload_core.
-            ok, msg = _upload_core(file_path, title, card, token)
-            if not ok:
-                time.sleep(5)
+            # TODO item 7: same 3-attempts/escalating-backoff change as
+            # _process_job's yt_tracks loop -- see its comment for why.
+            for _attempt in range(3):
                 ok, msg = _upload_core(file_path, title, card, token)
+                if ok or _attempt == 2:
+                    break
+                time.sleep(5 if _attempt == 0 else 10)
 
             if not ok:
-                log_error(f'yt_batch upload fail (2 attempts)  track={title!r}  err={msg}')
+                log_error(f'yt_batch upload fail (3 attempts)  track={title!r}  err={msg}')
                 tg_send(bot_token, chat_id,
                         f'⚠️ Upload failed for *{title}*\n`{msg[:200]}`')
                 with failed_lock:
