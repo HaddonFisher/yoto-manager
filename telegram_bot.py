@@ -2493,13 +2493,22 @@ def yt_search(query: str, n: int = 9) -> list:
     try:
         r = subprocess.run(
             _yt_dlp_cmd() + ['--no-playlist',
+             # player_client=android skips the deno/JS-challenge path entirely
+             # for search (measured ~16-18s for n=9 vs ~40s on the default web
+             # client). Search-only: android's downloadable *stream* URLs are
+             # degraded under YouTube's current SABR-only experiment, but we
+             # only read title/webpage_url/channel/duration here, and
+             # webpage_url is the ordinary youtube.com/watch?v=... link
+             # regardless of client -- so that degradation doesn't apply to
+             # what this function returns. yt_download_mp3() deliberately
+             # stays on the default client for the actual download.
+             '--extractor-args', 'youtube:player_client=android',
              '--print', '%(title)s|||%(webpage_url)s|||%(channel)s|||%(duration_string)s',
              f'ytsearch{n}:{query}'],
-            # yt-dlp now needs a JS runtime (deno) per-video to satisfy YouTube's
-            # extraction challenge; resolving n=9 results measured ~43s in
-            # practice, well past a 30s budget. 60s leaves real headroom
-            # without the caller waiting on a fully hung process forever.
-            capture_output=True, text=True, timeout=60,
+            # Measured ~16-18s for n=9 with player_client=android (down from
+            # ~40s on the default client). 30s restores real headroom above
+            # that without reintroducing the old near-60s worst-case wait.
+            capture_output=True, text=True, timeout=30,
         )
         _yt_combined = r.stdout + r.stderr
         print(f'  yt_search returncode={r.returncode}')
@@ -2790,11 +2799,18 @@ def yt_search_playlists(query: str, n: int = 9) -> list:
         r = subprocess.run(
             _yt_dlp_cmd() + [
                 '--flat-playlist', '--no-warnings',
+                # See yt_search()'s comment: search-only, avoids the deno/JS
+                # challenge, webpage_url is unaffected by the client choice.
+                '--extractor-args', 'youtube:player_client=android',
                 '--print', '%(title)s|||%(webpage_url)s|||%(uploader)s',
                 search_url,
             ],
-            # Same JS-runtime-per-item cost as yt_search — see its comment.
-            capture_output=True, text=True, timeout=60,
+            # Measured separately from yt_search(): this one runs 18-24s
+            # even with player_client=android (slower base mechanism --
+            # resolves a search-results page rather than ytsearchN:), so
+            # 30s left too little margin. 45s matches the headroom yt_search
+            # gets at its own measured 14s against a 30s timeout.
+            capture_output=True, text=True, timeout=45,
         )
         _yt_combined = r.stdout + r.stderr
         print(f'  yt_search_playlists returncode={r.returncode}')
