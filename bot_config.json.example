@@ -6,7 +6,10 @@
   "apple_music_enabled": true,
   "backup": {
     "enabled": false,
+    "backend": "local",
     "path": "/path/to/a/real/directory/on/this/host",
-    "mode": "organized"
+    "mode": "organized",
+    "dropbox_api_token": "REPLACE_ME",
+    "dropbox_base_path": "/Yoto Cards"
   }
 }

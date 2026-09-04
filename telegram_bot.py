@@ -1502,12 +1502,42 @@ def _upload_core(file_path: str, track_name: str, card: dict,
 
 
 def _safe_dirname(name: str) -> str:
-    """Strip characters that are invalid in directory names on common OS."""
+    """Strip characters that are invalid in directory names on common OS
+    (also used for the Dropbox-path segment in the dropbox_api backend —
+    Dropbox is more permissive than this, so it's a safe superset-strip)."""
     return re.sub(r'[<>:"/\\|?*]', '-', name).strip()
 
 
+_DROPBOX_TOKEN_PLACEHOLDER = 'REPLACE_ME'
+
+
+def _dropbox_upload(token: str, local_path: str, dropbox_path: str) -> None:
+    """Upload one file to Dropbox via their HTTP API (simple upload; fine
+    for our audio files, all well under the 150MB simple-upload limit).
+    Raises on any failure -- backup_track() catches and logs it, same as
+    the local-copy backend does for a failed shutil.copy2.
+    """
+    data = Path(local_path).read_bytes()
+    api_arg = json.dumps({
+        'path': dropbox_path,
+        'mode': 'add',        # never overwrite an existing backup
+        'autorename': True,   # ...rename instead, if a name collides
+        'mute': True,
+    })
+    req = urllib.request.Request(
+        'https://content.dropboxapi.com/2/files/upload',
+        data=data, method='POST',
+    )
+    req.add_header('Authorization', f'Bearer {token}')
+    req.add_header('Dropbox-API-Arg', api_arg)
+    req.add_header('Content-Type', 'application/octet-stream')
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        resp.read()
+
+
 def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
-    """Copy the source audio file to a local backup directory (if configured).
+    """Back up the source audio file (if configured) -- either a local copy,
+    or a direct push to Dropbox via their API, per backup.backend.
 
     Reads bot_config.json fresh each call so runtime config changes are
     respected without a bot restart.  Never raises — backup failures are
@@ -1520,6 +1550,23 @@ def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
         if not backup_cfg.get('enabled'):
             return
 
+        backend = backup_cfg.get('backend', 'local')
+
+        if backend == 'dropbox_api':
+            token = backup_cfg.get('dropbox_api_token', '')
+            if not token or token == _DROPBOX_TOKEN_PLACEHOLDER:
+                log_error(
+                    'backup failed — backend is dropbox_api but '
+                    f'dropbox_api_token is not set  track={track_name!r}'
+                )
+                return
+            base = backup_cfg.get('dropbox_base_path', '/Yoto Cards')
+            dropbox_path = f'{base}/{_safe_dirname(playlist_title)}/{Path(file_path).name}'
+            _dropbox_upload(token, file_path, dropbox_path)
+            log_activity(f'backup (dropbox api)  track={track_name!r}  dest={dropbox_path!r}')
+            return
+
+        # backend == 'local' (default / legacy)
         backup_path = backup_cfg.get('path', '')
         mode        = backup_cfg.get('mode', 'organized')
 
