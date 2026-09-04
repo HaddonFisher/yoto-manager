@@ -1684,6 +1684,10 @@ def yt_get_playlist_info(url: str) -> list:
     r = subprocess.run(
         _yt_dlp_cmd() + [
             '--flat-playlist', '--no-warnings',
+            # Same reasoning as yt_search(): avoids the deno/JS-challenge
+            # path, and webpage_url is the ordinary watch?v=... link
+            # regardless of client, which is all this function reads.
+            '--extractor-args', 'youtube:player_client=android',
             '--print', '%(title)s|||%(webpage_url)s',
             url,
         ],
