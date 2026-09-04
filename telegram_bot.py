@@ -497,17 +497,10 @@ def _process_job(job: dict) -> None:
         _YT_JOB_MAX_WORKERS = 3
 
         def _yt_download_phase(item: dict) -> str:
-            """Download + optional OGG transcode. Returns file_path, or
-            raises (caller records the error against this item)."""
-            mp3_path = yt_download_mp3(item['url'], item['title'])
-            file_path = mp3_path
-            try:
-                ogg = transcode_to_ogg(mp3_path)
-                if ogg:
-                    file_path = ogg
-            except Exception as e:
-                log_activity(f'job transcode skip  track={item["title"]!r}  reason={e}')
-            return file_path
+            """Download. Returns file_path, or raises (caller records the
+            error against this item). See TODO item 3 / transcode_to_ogg()'s
+            docstring for why this no longer calls transcode_to_ogg()."""
+            return yt_download_mp3(item['url'], item['title'])
 
         for item in yt_tracks:
             tg_send(bot_token, chat_id, f'⬇️ Downloading *{item["title"]}*…')
@@ -1938,17 +1931,10 @@ def _do_yt_batch_upload(bot_token: str, chat_id: int, card: dict,
         if not mp3_path:
             raise last_error  # caught in the main loop below
 
-        # Pre-transcode to OGG/Opus so server-side transcoding is near-instant.
-        # Falls back silently to the raw MP3 if ffmpeg is unavailable or fails.
-        file_path = mp3_path
-        try:
-            ogg = transcode_to_ogg(mp3_path)
-            if ogg:
-                file_path = ogg
-        except Exception as e:
-            log_activity(f'yt_batch transcode skip  track={title!r}  reason={e}')
-
-        return (i, track, file_path)
+        # No local pre-transcode -- see TODO item 3 / transcode_to_ogg()'s
+        # docstring: measured to make the raw-mp3-upload path both simpler
+        # and faster, not the "near-instant server transcode" it aimed for.
+        return (i, track, mp3_path)
 
     # ── Submit all downloads; process each upload as soon as its download done ─
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -2610,8 +2596,20 @@ def yt_download_mp3(url: str, title: str) -> str:
 
 def transcode_to_ogg(mp3_path: str) -> str | None:
     """
-    Transcode an MP3 to OGG/Opus using Yoto's target loudnorm settings so that
-    server-side transcoding completes almost instantly.
+    Transcode an MP3 to OGG/Opus using Yoto's target loudnorm settings --
+    originally meant to make server-side transcoding complete almost
+    instantly. NOT CALLED ANYWHERE as of 2026-09-04 (TODO item 3): a
+    controlled A/B on FUBARS, same track uploaded both ways to the same
+    card, measured the opposite of the intended effect --
+
+      raw mp3 upload:              5.3s  (server-side transcode: 2 polls)
+      pre-transcoded ogg upload:  21.3s  (server-side transcode: 15 polls)
+      + this function's own local encode cost:  16.7s
+
+    -- i.e. skipping this step was both faster server-side *and* obviously
+    faster overall once the 16.7s local encode is counted. Left defined
+    (not deleted) in case Yoto's backend behavior changes and this is
+    worth revisiting; do not wire it back in without re-measuring first.
 
     Uses a two-pass loudnorm approach (measure first, then encode) for accurate
     normalisation.  Falls back to a single-pass if the measurement step fails.
