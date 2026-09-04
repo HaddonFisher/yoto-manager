@@ -165,8 +165,12 @@ def _save_offset(offset: int) -> None:
     """Persist the Telegram update offset so restarts don't replay old messages."""
     try:
         OFFSET_FILE.write_text(json.dumps({'offset': offset}))
-    except Exception:
-        pass
+    except Exception as e:
+        # TODO item 5: was silent. A persistent failure here means every
+        # restart replays recent Telegram messages instead of just once --
+        # worth a trace if it ever happens repeatedly. Same fail-safe
+        # behavior (just continue), only the visibility changed.
+        log_error(f'_save_offset: could not write {OFFSET_FILE}', exc=e)
 
 
 def _load_offset() -> int:
@@ -174,8 +178,9 @@ def _load_offset() -> int:
     if OFFSET_FILE.exists():
         try:
             return int(json.loads(OFFSET_FILE.read_text()).get('offset', 0))
-        except Exception:
-            pass
+        except Exception as e:
+            # TODO item 5: was silent; same fail-safe fallback (0), now logged.
+            log_error(f'_load_offset: could not read {OFFSET_FILE} — defaulting to 0', exc=e)
     return 0
 
 # ── Yoto API base ─────────────────────────────────────────────────────────
@@ -3695,8 +3700,10 @@ def load_recent_playlists() -> list:
     try:
         if RECENT_PLAYLISTS_FILE.exists():
             return json.loads(RECENT_PLAYLISTS_FILE.read_text())
-    except Exception:
-        pass
+    except Exception as e:
+        # TODO item 5: was silent, unlike record_recent_playlist's own
+        # write-failure logging right below. Same fallback ([]), now logged.
+        log_error(f'load_recent_playlists: could not read {RECENT_PLAYLISTS_FILE}', exc=e)
     return []
 
 
@@ -3726,8 +3733,10 @@ def _load_last_commands() -> dict:
     try:
         if LAST_COMMAND_FILE.exists():
             return json.loads(LAST_COMMAND_FILE.read_text())
-    except Exception:
-        pass
+    except Exception as e:
+        # TODO item 5: was silent, unlike _save_last_command's own
+        # write-failure logging right below. Same fallback ({}), now logged.
+        log_error(f'_load_last_commands: could not read {LAST_COMMAND_FILE}', exc=e)
     return {}
 
 
@@ -3755,8 +3764,13 @@ def _load_queue_unlocked() -> list:
     if QUEUE_FILE.exists():
         try:
             return json.loads(QUEUE_FILE.read_text())
-        except Exception:
-            pass
+        except Exception as e:
+            # TODO item 5: was silent -- worth catching here specifically,
+            # since this is the dashboard's failed-upload retry queue; a
+            # silent read failure would make failed tracks disappear from
+            # the "Save for Later" list with no trace they ever existed.
+            # Same fallback ([]), now logged.
+            log_error(f'_load_queue_unlocked: could not read {QUEUE_FILE}', exc=e)
     return []
 
 
