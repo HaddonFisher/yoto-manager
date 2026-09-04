@@ -18,6 +18,33 @@ control**: download (~5-10s, network + yt-dlp bound) and Yoto's own server-side 
 obvious lever to pull directly — the real lever on total wall-clock time when a user is dealing
 with more than one track is item 1.
 
+## 2026-09-04 update: all 7 items worked, each committed/deployed/verified separately
+
+- [x] **1. Parallelize `/find`'s multi-track downloads** — ported the existing
+      `_do_yt_batch_upload` pattern in. Measured on a real 2-track `/find`: **100.0s → 71.1s**.
+- [x] **2. `yt_get_playlist_info` timeout/client fix** — applied for consistency; measured 2.4s on
+      a real 23-track playlist, so it was never actually the slow path in practice.
+- [x] **3. Pre-transcode A/B** — did the controlled test before touching anything, same track
+      both ways: raw mp3 upload **5.3s** vs pre-transcoded-ogg **21.3s** (+16.7s local encode on
+      top). The step made things worse, not just useless — removed both call sites,
+      `transcode_to_ogg()` left defined with the numbers in its docstring in case this is ever
+      worth revisiting.
+- [x] **4. `_load_pending()` silent failure** — now logs before returning `{}`; fail-safe
+      behavior unchanged. File locking deliberately not added (reasoning inline at the site) —
+      the race is inter-process and doesn't occur in normal production operation.
+- [x] **5. Audit of the other 9 bare `except Exception:` blocks** — 5 fixed (same log-then-same-
+      fallback treatment as item 4), 4 left alone with reasoning documented at each site.
+- [x] **6. Backup health signal** — `backup_status.json` + `/local/backup-status` + one dashboard
+      indicator, same small-JSON-file pattern already used elsewhere in this file. Verified live:
+      confirmed "never" before any backup ran under the new code, then confirmed it updated
+      correctly after a real upload.
+- [x] **7. Upload retry backoff** — 2 attempts flat-5s → 3 attempts with 5s/10s backoff, in both
+      call sites. Deliberately did not add retryable-vs-not error classification — no evidence
+      to calibrate it against (every upload this session succeeded on attempt 1).
+
+Full reasoning, numbers, and verification steps for each are in their own commits, not
+duplicated here.
+
 ## 1. Parallelize the `/find` multi-track path (High value / Medium effort / Low risk)
 
 **What:** `_process_job()` — the job the standard `/find` → multiselect → "Done" flow queues —
