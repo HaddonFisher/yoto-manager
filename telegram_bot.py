@@ -2448,7 +2448,11 @@ def yt_search(query: str, n: int = 9) -> list:
             _yt_dlp_cmd() + ['--no-playlist',
              '--print', '%(title)s|||%(webpage_url)s|||%(channel)s|||%(duration_string)s',
              f'ytsearch{n}:{query}'],
-            capture_output=True, text=True, timeout=30,
+            # yt-dlp now needs a JS runtime (deno) per-video to satisfy YouTube's
+            # extraction challenge; resolving n=9 results measured ~43s in
+            # practice, well past a 30s budget. 60s leaves real headroom
+            # without the caller waiting on a fully hung process forever.
+            capture_output=True, text=True, timeout=60,
         )
         _yt_combined = r.stdout + r.stderr
         print(f'  yt_search returncode={r.returncode}')
@@ -2742,7 +2746,8 @@ def yt_search_playlists(query: str, n: int = 9) -> list:
                 '--print', '%(title)s|||%(webpage_url)s|||%(uploader)s',
                 search_url,
             ],
-            capture_output=True, text=True, timeout=30,
+            # Same JS-runtime-per-item cost as yt_search — see its comment.
+            capture_output=True, text=True, timeout=60,
         )
         _yt_combined = r.stdout + r.stderr
         print(f'  yt_search_playlists returncode={r.returncode}')
