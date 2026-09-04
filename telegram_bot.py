@@ -480,45 +480,68 @@ def _process_job(job: dict) -> None:
             tg_send(bot_token, chat_id,
                     f'❌ *{title}* failed: `{err[:200]}`')
 
-    # YouTube tracks (need to download first)
+    # YouTube tracks (need to download first). Downloads run in parallel —
+    # same MAX_WORKERS=3 ThreadPoolExecutor pattern _do_yt_batch_upload
+    # already uses for /findplay, ported here since /find's multiselect can
+    # queue several tracks at once too. Uploads stay sequential (as
+    # _do_yt_batch_upload's own docstring explains, cross-thread safety for
+    # the same card is handled inside _upload_core via _CONTENT_LOCK) and
+    # start as soon as each download finishes. Message text/format per track
+    # is unchanged from the old sequential version; the one visible
+    # difference is that multiple "Downloading..." messages now arrive
+    # up front rather than interleaved one-at-a-time, and completion order
+    # follows whichever download finishes first rather than selection order.
     yt_tracks = job.get('tracks', [])
-    for item in yt_tracks:
-        title = item['title']
-        url   = item['url']
-        tg_send(bot_token, chat_id,
-                f'⬇️ Downloading *{title}*…')
-        try:
-            mp3_path = yt_download_mp3(url, title)
-        except Exception as e:
-            log_error(f'job yt_download fail  track={title!r}  err={e}', exc=e)
-            tg_send(bot_token, chat_id,
-                    f'❌ *{title}* download failed: `{str(e)[:200]}`')
-            continue
-        # Optional OGG transcode
-        file_path = mp3_path
-        try:
-            ogg = transcode_to_ogg(mp3_path)
-            if ogg:
-                file_path = ogg
-        except Exception as e:
-            log_activity(f'job transcode skip  track={title!r}  reason={e}')
+    if yt_tracks:
+        import concurrent.futures
+        _YT_JOB_MAX_WORKERS = 3
 
-        tg_send(bot_token, chat_id, f'⏳ Uploading *{title}* → *{playlist}*…')
-        ok, err = _upload_core(file_path, title, card, token)
-        if not ok:
-            time.sleep(5)
-            ok, err = _upload_core(file_path, title, card, token)
-        if ok:
-            record_recent_playlist(card.get('cardId') or card.get('id', ''), playlist)
-            backup_track(file_path, title, playlist)
-            if err:
-                tg_send(bot_token, chat_id, err)
-            tg_send(bot_token, chat_id, f'✅ *{title}* → *{playlist}*')
-            log_activity(f'job upload ok  track={title!r}  playlist={playlist!r}')
-        else:
-            log_error(f'job upload fail (2 attempts)  track={title!r}  err={err}')
-            tg_send(bot_token, chat_id,
-                    f'❌ *{title}* failed: `{err[:200]}`')
+        def _yt_download_phase(item: dict) -> str:
+            """Download + optional OGG transcode. Returns file_path, or
+            raises (caller records the error against this item)."""
+            mp3_path = yt_download_mp3(item['url'], item['title'])
+            file_path = mp3_path
+            try:
+                ogg = transcode_to_ogg(mp3_path)
+                if ogg:
+                    file_path = ogg
+            except Exception as e:
+                log_activity(f'job transcode skip  track={item["title"]!r}  reason={e}')
+            return file_path
+
+        for item in yt_tracks:
+            tg_send(bot_token, chat_id, f'⬇️ Downloading *{item["title"]}*…')
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_YT_JOB_MAX_WORKERS) as pool:
+            futures = {pool.submit(_yt_download_phase, item): item for item in yt_tracks}
+            for fut in concurrent.futures.as_completed(futures):
+                item  = futures[fut]
+                title = item['title']
+
+                try:
+                    file_path = fut.result()
+                except Exception as e:
+                    log_error(f'job yt_download fail  track={title!r}  err={e}', exc=e)
+                    tg_send(bot_token, chat_id,
+                            f'❌ *{title}* download failed: `{str(e)[:200]}`')
+                    continue
+
+                tg_send(bot_token, chat_id, f'⏳ Uploading *{title}* → *{playlist}*…')
+                ok, err = _upload_core(file_path, title, card, token)
+                if not ok:
+                    time.sleep(5)
+                    ok, err = _upload_core(file_path, title, card, token)
+                if ok:
+                    record_recent_playlist(card.get('cardId') or card.get('id', ''), playlist)
+                    backup_track(file_path, title, playlist)
+                    if err:
+                        tg_send(bot_token, chat_id, err)
+                    tg_send(bot_token, chat_id, f'✅ *{title}* → *{playlist}*')
+                    log_activity(f'job upload ok  track={title!r}  playlist={playlist!r}')
+                else:
+                    log_error(f'job upload fail (2 attempts)  track={title!r}  err={err}')
+                    tg_send(bot_token, chat_id,
+                            f'❌ *{title}* failed: `{err[:200]}`')
 
 
 def run_telegram_bot(cfg: dict) -> None:
