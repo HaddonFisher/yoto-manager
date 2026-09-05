@@ -199,8 +199,14 @@ TEMP_DIR = Path('/tmp/yoto_downloads')
 
 # ── Pending fuzzy-match state ─────────────────────────────────────────────
 # Keyed by "chat_id:user_id" in JSON, (chat_id, user_id) tuple in memory.
-# Persisted to bot_pending.json so restarts don't lose context.
-PENDING_TTL = 300  # seconds (5 minutes)
+# Persisted to bot_pending.json so restarts don't lose context -- confirmed
+# live: wrote a pending entry, restarted the real systemd service, its own
+# startup log reported "1 pending state(s) restored." Restart does not
+# lose state; the reported "unresponsive after a pause" was plain TTL
+# expiry (was 300s = 5 minutes -- too short for a real household pause)
+# combined with the silent-failure bug fixed alongside this. Bumped to
+# 30 minutes: generous enough for "stepped away for a bit," still bounded.
+PENDING_TTL = 1800  # seconds (30 minutes)
 
 
 def _pending_key(chat_id: int, from_uid: int) -> str:
@@ -1038,12 +1044,20 @@ def handle_selection_reply(bot_token: str, chat_id: int, from_uid: int,
     is_callback distinguishes an actual button tap (always one of a known
     short set of callback_data tokens, e.g. 'done', 'yms:3') from an
     ordinary text message that happens to reach here via the catch-all
-    for unrecognized text. Reported as "the bot goes unresponsive
-    mid-flow": reproduced live -- a button tap referencing pending state
-    that's missing or expired (10-minute TTL; also the exact symptom a
-    lost/corrupted bot_pending.json write would produce, since there's no
-    locking on it) previously returned silently, with zero Telegram
-    message and zero log line -- indistinguishable from a frozen bot.
+    for unrecognized text. Reported as "unresponsive when I come back
+    after a pause": confirmed the cause is plain PENDING_TTL expiry (was
+    5 minutes -- see its definition), not a restart losing state (tested
+    live against the real service: restart correctly restores unexpired
+    pending state) and not Telegram's own callback-expiry (confirmed via
+    docs: that clock runs from button-press to our answer, and we always
+    answer within milliseconds, so it never actually fires here). This
+    guard stays regardless -- it's the general "pending resolution
+    failed for any reason" backstop (also covers a lost/corrupted
+    bot_pending.json write, since there's no locking on it, and any future
+    cause this reasoning didn't anticipate). Reproduced live pre-fix: a
+    button tap referencing missing/expired pending state returned
+    silently, zero Telegram message, zero log line -- indistinguishable
+    from a frozen bot.
     Now told to the user for a real button tap. Left silent for plain
     text (is_callback=False) -- staying quiet for unrelated chatter that
     isn't waiting on anything is correct, not a bug.
