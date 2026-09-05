@@ -1,141 +1,72 @@
 # Yoto Manager
 
-**Yoto Manager** is a local web dashboard and Telegram bot for managing your children's [Yoto](https://yotoplay.com) audio player cards. It runs entirely on your Mac — no cloud account needed beyond Yoto and Telegram themselves.
+**Yoto Manager** is a Telegram bot (plus a small local dashboard) for adding music and audio to your [Yoto](https://yotoplay.com) cards. Search YouTube (and, optionally, your Mac's Apple Music library) from your phone, pick a result, choose a card, and the bot downloads, tags, and uploads it — no laptop, no dragging files around.
 
-With Yoto Manager you can:
-
-- **Search Apple Music** for a song and add it straight to a Yoto card playlist — from your phone, via Telegram
-- **Download from YouTube** — paste a URL or search by name; the audio is downloaded, converted, and uploaded automatically
-- **Upload your own audio files** through the web dashboard (great for audiobooks, homemade recordings, or anything you already have)
-- **Manage card playlists** — create new playlists, browse tracks, and organise your cards from a clean local web interface
-- **Control everything from Telegram** — you (or anyone in your family group) can add songs in a few taps without opening a laptop
-
-It works by running a small Python HTTP server on your Mac. That server powers the web dashboard at `http://localhost:8765` and keeps the Telegram bot running in the background.
-
-> **Who is this for?** Parents who want an easy way to keep Yoto cards fresh without manually dragging files around. Once it's set up, adding a new song to a card is just a Telegram message.
+It runs as a small Python process on one machine — your Mac, or a headless Linux box — with a web dashboard at `http://localhost:8765` for logging in to Yoto and checking on things, and a Telegram bot that does the actual day-to-day work.
 
 ---
 
-> **How it works in practice:** Open Telegram, type `/find Hey Jude`, pick the result you want, choose which Yoto card it goes on, and you're done — the bot handles the download and upload while you get on with your day.
+## How it works
+
+**Who can use it:** one owner account. `bot_config.json` sets an `owner_chat_id` and an `allowed_user_ids` list; the bot only acts on messages from those IDs and silently ignores everything else. This is a direct-message bot, not a group bot — there's no group-chat mode.
+
+**Commands**, sent as a DM to the bot:
+
+| Command | What it does |
+|---|---|
+| `/find Song Title` | Searches (Apple Music first if that feature's enabled, otherwise YouTube), shows a list to pick from (tap to select, tap Done), then asks which Yoto card to add it to. |
+| `/find Song Title \| Card Name` | Same search, but with the card name given up front — skips the card-picking step if it matches exactly. |
+| `/findplay Some Playlist` | Searches YouTube for **playlists** matching the query; browse individual tracks or add the whole thing. |
+| `/findplay Some Playlist \| Card Name` | Same, with the card pre-specified. |
+| `/create Card Name` | Creates a new, empty Yoto card. |
+| `/retry` | Repeats your last `/find`, `/findplay`, or `/create`. |
+| `/help` | Lists the commands. |
+| `/restart` | Restarts the server process, picking up any code changes. |
+
+**The flow, end to end:** you pick tracks from the search results, the bot downloads the audio (from YouTube — see below for what "Apple Music" actually means here), uploads it to Yoto, and Yoto transcodes it server-side; you get a confirmation message per track. Selecting several tracks at once downloads them in parallel and uploads them as each one finishes, rather than one at a time.
+
+**Setup:** run `python3 install.py`. It asks for your Telegram bot token and your own numeric chat ID (message something like `@userinfobot` to get it), walks you through the optional features below, writes `bot_config.json`, and then actually checks everything works — a real Telegram API call, a real Yoto API call, and so on — rather than just saving the file. It's safe to re-run any time to change settings or re-check things; see its own `--help` and in-script guidance for details, including how to complete Yoto's one-time browser login (a Yoto account and cards need to already exist — `install.py` doesn't create those).
+
+---
+
+## Optional features
+
+Both are plain on/off flags in `bot_config.json`, and `install.py` will ask about each one.
+
+### `apple_music_enabled`
+
+When on, `/find` first searches your **local Apple Music library** (via AppleScript automating Music.app) before falling back to YouTube — useful for confirming you already own a track, or preferring a specific version. This only works when the bot is running **on a Mac** with Music.app; there's no equivalent on Linux, and enabling it on a non-Mac host will just fail on every search. `install.py` checks for this and warns you. Either way, the *audio itself* always comes from YouTube — this flag only affects whether the library is searched for a match first.
+
+### `backup`
+
+When enabled, every uploaded track is also copied somewhere else, organized into a folder per card. Two backends:
+
+- **`local`** — copied to a folder on the same machine (`backup.path`).
+- **`dropbox_api`** — pushed straight to a Dropbox folder over their API (`backup.dropbox_base_path`), using a token you generate yourself in Dropbox's developer console. Nothing is synced down to the machine running the bot — it's upload-only.
+
+If a backup fails (bad token, unwritable path, etc.), the dashboard shows it and the bot sends you a Telegram message — it doesn't fail silently.
 
 ---
 
 ## What you'll need
 
-- **Python 3.10 or later** — check by running `python3 --version` in Terminal
-- **ffmpeg** — used to convert audio. Install via [Homebrew](https://brew.sh): `brew install ffmpeg`
-- **A Yoto account** with cards already set up
-- **A Telegram account** and a bot token (see below)
+- **Python 3.10+**
+- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**, kept reasonably up to date — YouTube changes often enough that a stale copy will break search
+- **A JS runtime** ([Deno](https://deno.com)) — current yt-dlp needs one to solve YouTube's extraction challenge
+- A **Yoto account** with cards already set up
+- A **Telegram bot token** from [@BotFather](https://t.me/BotFather)
 
----
-
-## Installation
-
-### 1. Get the files
-
-Either [download this repo as a ZIP](../../archive/refs/heads/main.zip) and unzip it somewhere convenient (like your Desktop or Documents folder), or clone it:
-
-```
-git clone https://github.com/YOUR_USERNAME/yoto-manager.git
-cd yoto-manager
-```
-
-### 2. Authenticate with Yoto
-
-Run the setup script once. It will walk you through authorising your Yoto account:
-
-```
-python3 setup.py
-```
-
-It will ask you for a **Yoto Client ID** and then open a URL in your browser. Follow the prompts to log in. Your credentials are saved locally to `yoto_token.json` (this file is never shared or uploaded).
-
-### 3. Create your Telegram bot
-
-1. Open Telegram and search for **@BotFather**
-2. Send `/newbot` and follow the steps — pick a name and a username
-3. BotFather will give you a **bot token** that looks like `1234567890:ABCdef...`
-4. Create or open a Telegram group that includes your new bot
-
-You also need your **group's chat ID**. The easiest way: add `@userinfobot` to your group, it will reply with the group ID (a negative number like `-987654321`).
-
-### 4. Configure the bot
-
-Run the interactive installer:
-
-```
-python3 install.py
-```
-
-It collects your Telegram token and chat ID, walks you through each optional
-feature (Apple Music search, track backup — local folder or Dropbox) asking
-whether to turn it on and only then asking for that feature's own details,
-writes `bot_config.json`, and then actually validates everything with real
-calls (Telegram's `getMe`, a real Yoto API call, a real Dropbox write+delete
-or local write+delete test, and checks that `yt-dlp`/a JS runtime/`ffmpeg`
-are present) rather than just trusting the file looks right.
-
-It's safe to re-run any time — against an existing install it shows your
-current values (secrets masked) and pressing Enter keeps them; nothing is
-written until you confirm a summary of exactly what will change, and your
-previous config is backed up alongside the new one. Use `python3 install.py
---config /path/to/other/bot_config.json` to point it at a different file.
-
-(If you'd rather edit the file by hand: copy `bot_config.json.example` to
-`bot_config.json` and fill in the fields it documents — `install.py` writes
-the same shape, it just validates as it goes.)
-
----
-
-## Starting the server
-
-Double-click **Start Yoto Manager.command** in Finder.
-
-> On first run, macOS may warn you it can't verify the file. Right-click it, choose **Open**, and confirm. You only need to do this once.
-
-A Terminal window will open and the dashboard will load in your browser at `http://localhost:8765`. Keep that window open while you're using the bot — closing it stops everything.
-
-To restart after a crash or update, double-click **restart_server.command** instead.
-
----
-
-## Daily use — Telegram commands
-
-Send these in your Telegram group:
-
-| Command | What it does |
-|---|---|
-| `/find The Beatles Hey Jude` | Searches Apple Music then YouTube. You'll get a list of results to pick from, then choose which Yoto playlist to add it to. |
-| `/find Hey Jude \| Peppa Pig Mix` | Same search, but with the Yoto playlist already specified — skips the playlist-picking step. |
-| `/findplay Party Favourites` | Searches YouTube for **playlists** matching that query. You can browse tracks or add all of them at once. |
-| `/findplay Party Favourites \| Peppa Pig Mix` | Same, with a Yoto playlist pre-specified. |
-| `/create Road Trip Songs` | Creates a new empty Yoto playlist with that name. |
-| `/retry` | Repeats your last `/find`, `/findplay`, or `/create` command — handy if it timed out. |
-| `/help` | Shows a summary of all commands. |
-
-After picking a track, the bot downloads it, converts it to the right format, and uploads it to Yoto. The whole process usually takes 15–30 seconds. You'll get a confirmation message when it's done.
+`install.py` checks all of these for you and tells you what's missing.
 
 ---
 
 ## Troubleshooting
 
-**The server won't start**
-- Make sure Python 3.10+ is installed: `python3 --version`
-- Check that `ffmpeg` is installed: `ffmpeg -version`
-- If the port is in use, another copy may already be running — use `restart_server.command` instead
-
-**The bot isn't responding in Telegram**
-- Make sure the server is still running (the Terminal window is open)
-- Check that your `bot_config.json` has the correct token and group ID
-- The group ID must be negative (e.g. `-987654321`) — if it's positive, it's a user ID, not a group
-- Make sure the bot has been added to the group as a member
-
-**Uploads are failing**
-- Your Yoto token may have expired — log in again via the dashboard at `http://localhost:8765`, then run `python3 install.py` to confirm it with a real API call
-- The dashboard shows recent activity and errors
-
-**The dashboard says "Not authenticated"**
-- Log in via the dashboard at `http://localhost:8765` (it writes `yoto_token.json` itself); `python3 install.py` will confirm it worked
+- **Nothing happens when I message the bot** — confirm the server's running (`systemctl status`, or the terminal window on a Mac) and that your chat ID is in `allowed_user_ids`.
+- **Search returns nothing** — check `yt-dlp --version` isn't badly out of date, and that a JS runtime is installed; both are exactly the kind of thing that's broken this before.
+- **A button tap does nothing** — search results expire after a while (`PENDING_TTL` in `telegram_bot.py`); the bot will tell you if a selection's expired — just search again.
+- **Uploads aren't backing up** — check the backup indicator on the dashboard (`http://localhost:8765`); it shows the last successful backup or the current failure reason directly.
+- **Yoto login problems** — log in again via the dashboard, then run `python3 install.py` to confirm it with a real API call.
 
 ---
 
@@ -143,20 +74,17 @@ After picking a track, the bot downloads it, converts it to the right format, an
 
 | File | Purpose |
 |---|---|
-| `server.py` | The local web server and API proxy |
-| `telegram_bot.py` | The Telegram bot logic |
+| `telegram_bot.py` | The bot itself — search, selection, upload, backup |
+| `server.py` | Local HTTP server: the dashboard, Yoto login, health/status endpoints |
 | `index.html` | The web dashboard |
-| `install.py` | Interactive install/reconfigure — collects config, walks each feature flag, validates everything with real calls |
-| `setup.py` | Authenticates the separate standalone `sync.py` script (not the bot itself — see below) |
-| `sync.py` | Standalone script for bulk syncing (optional) |
-| `bot_config.json.example` | Template for your bot configuration, documenting every field `install.py` can write |
-| `Start Yoto Manager.command` | Double-click to launch |
-| `restart_server.command` | Double-click to restart after a crash |
+| `install.py` | Interactive setup/reconfigure, with real validation |
+| `bot_config.json.example` | Every config field `install.py` can write, documented |
+| `setup.py`, `sync.py` | A separate, optional standalone bulk-sync tool with its own auth — not used by the bot above |
 
 ---
 
 ## Privacy & security
 
-- Everything runs **locally on your Mac** — no cloud server, no third-party service beyond Yoto and Telegram themselves
-- Your Yoto credentials (`yoto_token.json`) and bot token (`bot_config.json`) are stored only on your machine and are excluded from version control
-- The bot only responds to the Telegram group you specify — messages from anywhere else are silently ignored
+- Runs locally — no third-party service involved beyond Yoto, Telegram, and (if enabled) Dropbox
+- `bot_config.json` and `yoto_token.json` hold your credentials and are excluded from version control
+- The bot only ever acts on messages from the chat IDs you configure
