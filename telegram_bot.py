@@ -2651,21 +2651,37 @@ def yt_search(query: str, n: int = 9) -> list:
     try:
         r = subprocess.run(
             _yt_dlp_cmd() + ['--no-playlist',
-             # player_client=android skips the deno/JS-challenge path entirely
-             # for search (measured ~16-18s for n=9 vs ~40s on the default web
-             # client). Search-only: android's downloadable *stream* URLs are
-             # degraded under YouTube's current SABR-only experiment, but we
-             # only read title/webpage_url/channel/duration here, and
-             # webpage_url is the ordinary youtube.com/watch?v=... link
-             # regardless of client -- so that degradation doesn't apply to
-             # what this function returns. yt_download_mp3() deliberately
-             # stays on the default client for the actual download.
+             # --flat-playlist is the real fix: ytsearchN: without it does a
+             # FULL per-video extraction (formats, streaming challenge, the
+             # works) for every result, even though the picker only ever
+             # renders title/channel/duration and needs url for later --
+             # checked the rendering code, nothing else is used. Flat mode
+             # gets exactly those 4 fields from the lightweight
+             # search-results-page parse alone, skipping per-video
+             # resolution entirely. Measured: 16.7s -> 3.5s for n=9 (three
+             # different real queries, 3.3-3.7s each), same 9 results, same
+             # fields populated, durations off by at most 1s in a couple of
+             # entries (display-only). Full per-video extraction still
+             # happens exactly once, for whichever one track the user
+             # selects, in yt_download_mp3().
+             # player_client=android on top: skips the deno/JS-challenge
+             # path too (measured ~16-18s vs ~40s on the default client,
+             # before adding --flat-playlist). Search-only: android's
+             # downloadable *stream* URLs are degraded under YouTube's
+             # current SABR-only experiment, but webpage_url is the
+             # ordinary youtube.com/watch?v=... link regardless of client,
+             # so that degradation doesn't apply to what this function
+             # returns. yt_download_mp3() deliberately stays on the default
+             # client for the actual download.
+             '--flat-playlist',
              '--extractor-args', 'youtube:player_client=android',
              '--print', '%(title)s|||%(webpage_url)s|||%(channel)s|||%(duration_string)s',
              f'ytsearch{n}:{query}'],
-            # Measured ~16-18s for n=9 with player_client=android (down from
-            # ~40s on the default client). 30s restores real headroom above
-            # that without reintroducing the old near-60s worst-case wait.
+            # Measured ~3.5s for n=9 with --flat-playlist + player_client=
+            # android. 30s is now a very wide margin, not a tight one --
+            # left as-is rather than tightened further, since a genuine
+            # hang is rare enough that shaving this timeout buys little and
+            # a real slow network day shouldn't turn into a false timeout.
             capture_output=True, text=True, timeout=30,
         )
         _yt_combined = r.stdout + r.stderr
