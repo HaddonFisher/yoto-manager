@@ -648,7 +648,7 @@ def run_telegram_bot(cfg: dict) -> None:
                         continue
 
                     tg_answer_callback(bot_token, cq_id)
-                    handle_selection_reply(bot_token, chat_id, from_uid, msg_id, data)
+                    handle_selection_reply(bot_token, chat_id, from_uid, msg_id, data, is_callback=True)
                     continue
 
                 # ── Regular message ──────────────────────────────────────
@@ -1032,18 +1032,38 @@ def _offer_pick_or_create(bot_token: str, chat_id: int, from_uid: int, msg_id: i
 
 
 def handle_selection_reply(bot_token: str, chat_id: int, from_uid: int,
-                            msg_id: int, text: str) -> None:
-    """Dispatch pending-state replies based on their type."""
+                            msg_id: int, text: str, is_callback: bool = False) -> None:
+    """Dispatch pending-state replies based on their type.
+
+    is_callback distinguishes an actual button tap (always one of a known
+    short set of callback_data tokens, e.g. 'done', 'yms:3') from an
+    ordinary text message that happens to reach here via the catch-all
+    for unrecognized text. Reported as "the bot goes unresponsive
+    mid-flow": reproduced live -- a button tap referencing pending state
+    that's missing or expired (10-minute TTL; also the exact symptom a
+    lost/corrupted bot_pending.json write would produce, since there's no
+    locking on it) previously returned silently, with zero Telegram
+    message and zero log line -- indistinguishable from a frozen bot.
+    Now told to the user for a real button tap. Left silent for plain
+    text (is_callback=False) -- staying quiet for unrelated chatter that
+    isn't waiting on anything is correct, not a bug.
+    """
     key = (chat_id, from_uid)
     pending = pending_matches.get(key)
 
     if not pending:
-        return  # not waiting for a reply from this user — stay silent
+        if is_callback:
+            tg_send(bot_token, chat_id,
+                    '⏱️ That selection is no longer active — send /find again.')
+        return
 
     # Expire old pending state
     if time.time() > pending['expires_at']:
         del pending_matches[key]
         _save_pending()
+        if is_callback:
+            tg_send(bot_token, chat_id,
+                    '⏱️ That selection expired — send /find again.')
         return
 
     ptype = pending.get('type', 'upload')
