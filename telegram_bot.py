@@ -480,7 +480,7 @@ def _process_job(job: dict) -> None:
         ok, err = _upload_core(local_path, title, card, token)
         if ok:
             record_recent_playlist(card.get('cardId') or card.get('id', ''), playlist)
-            backup_track(local_path, title, playlist)
+            backup_track(bot_token, chat_id, local_path, title, playlist)
             if err:
                 tg_send(bot_token, chat_id, err)
             tg_send(bot_token, chat_id, f'✅ *{title}* → *{playlist}*')
@@ -498,7 +498,7 @@ def _process_job(job: dict) -> None:
         ok, err = _upload_core(file_path, title, card, token)
         if ok:
             record_recent_playlist(card.get('cardId') or card.get('id', ''), playlist)
-            backup_track(file_path, title, playlist)
+            backup_track(bot_token, chat_id, file_path, title, playlist)
             if err:
                 tg_send(bot_token, chat_id, err)
             tg_send(bot_token, chat_id, f'✅ *{title}* → *{playlist}*')
@@ -567,7 +567,7 @@ def _process_job(job: dict) -> None:
                     time.sleep(5 if _attempt == 0 else 10)
                 if ok:
                     record_recent_playlist(card.get('cardId') or card.get('id', ''), playlist)
-                    backup_track(file_path, title, playlist)
+                    backup_track(bot_token, chat_id, file_path, title, playlist)
                     if err:
                         tg_send(bot_token, chat_id, err)
                     tg_send(bot_token, chat_id, f'✅ *{title}* → *{playlist}*')
@@ -1592,6 +1592,15 @@ def _dropbox_upload(token: str, local_path: str, dropbox_path: str) -> None:
         resp.read()
 
 
+def _read_backup_status() -> dict:
+    try:
+        if BACKUP_STATUS_FILE.exists():
+            return json.loads(BACKUP_STATUS_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
 def _record_backup_success(track_name: str, backend: str, dest: str) -> None:
     """TODO item 6: write a small 'last successful backup' marker so a
     failing-every-time backup path (the actual Dropbox bug this was
@@ -1600,26 +1609,87 @@ def _record_backup_success(track_name: str, backend: str, dest: str) -> None:
     small-JSON-file pattern already used for recent_playlists.json etc.,
     no new infrastructure. Best-effort: failure to write this is not
     worth failing the backup over, so it's logged, not raised.
+
+    Merges onto the existing file (rather than overwriting it) and clears
+    any recorded failure -- a success means whatever was failing is now
+    resolved, so the dashboard shouldn't keep showing a stale warning.
     """
     try:
-        BACKUP_STATUS_FILE.write_text(json.dumps({
+        status = _read_backup_status()
+        status.update({
             'last_success_at': time.time(),
             'last_success_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             'track': track_name,
             'backend': backend,
             'dest': dest,
-        }, indent=2))
+            'last_failure_at': None,
+            'last_failure_iso': None,
+            'last_failure_reason': None,
+        })
+        BACKUP_STATUS_FILE.write_text(json.dumps(status, indent=2))
     except Exception as e:
         log_error(f'_record_backup_success: could not write {BACKUP_STATUS_FILE}', exc=e)
 
 
-def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
+# Rate-limited failure alert -- same pattern as _am_auth_alert_last_sent /
+# _AM_AUTH_ALERT_COOLDOWN elsewhere in this file. A passive dashboard
+# indicator only helps if someone opens the dashboard; this is the thing
+# that makes a failing backup impossible to miss for months again.
+_backup_failure_alert_last_sent: float = 0.0
+_BACKUP_FAILURE_ALERT_COOLDOWN: int = 3600  # 1 hour
+
+
+def _record_backup_failure(bot_token: str, chat_id: int, reason: str) -> None:
+    """Companion to _record_backup_success. Merges onto the status file
+    (leaves last_success_* alone -- a live failure and a past success can
+    both be true at once) and sends a rate-limited Telegram alert. Never
+    raises: a failed alert-send must not turn a soft-fail into a hard one.
+    """
+    try:
+        status = _read_backup_status()
+        status.update({
+            'last_failure_at': time.time(),
+            'last_failure_iso': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'last_failure_reason': reason,
+        })
+        BACKUP_STATUS_FILE.write_text(json.dumps(status, indent=2))
+    except Exception as e:
+        log_error(f'_record_backup_failure: could not write {BACKUP_STATUS_FILE}', exc=e)
+
+    global _backup_failure_alert_last_sent
+    now = time.time()
+    if now - _backup_failure_alert_last_sent < _BACKUP_FAILURE_ALERT_COOLDOWN:
+        return
+    _backup_failure_alert_last_sent = now
+    try:
+        # reason is often raw exception text (e.g. from Dropbox upload
+        # errors) and can contain _, *, or ` -- any of which broke Telegram's
+        # legacy Markdown parser outright on the first real test of this
+        # alert (an unescaped "dropbox_api_token" alone was enough to make
+        # sendMessage 400). Strip backticks (can't safely nest them) and
+        # send as an inline-code span so the rest can't be parsed as
+        # Markdown either -- this alert failing to send would defeat the
+        # entire point of this fix.
+        safe_reason = reason.replace('`', "'")
+        tg_send(bot_token, chat_id,
+                f'⚠️ Backup failing: `{safe_reason}`\nTracks are still being added fine — only the backup copy is affected.')
+    except Exception as e:
+        log_error('backup failure alert itself failed to send', exc=e)
+
+
+def backup_track(bot_token: str, chat_id: int, file_path: str, track_name: str,
+                  playlist_title: str) -> None:
     """Back up the source audio file (if configured) -- either a local copy,
     or a direct push to Dropbox via their API, per backup.backend.
 
     Reads bot_config.json fresh each call so runtime config changes are
-    respected without a bot restart.  Never raises — backup failures are
-    logged but do not affect the upload result.
+    respected without a bot restart.  Never raises — backup failures don't
+    affect the upload result, which already succeeded by the time this
+    runs -- but they are now loud: every failure path here writes to
+    backup_status.json AND sends a rate-limited Telegram alert (bot_token/
+    chat_id are for that alert only; a failed send doesn't escalate this
+    to a hard failure). This is the direct fix for the Dropbox backup path
+    having failed silently, every time, for months.
     """
     try:
         raw = Path('bot_config.json').read_text(encoding='utf-8')
@@ -1633,14 +1703,19 @@ def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
         if backend == 'dropbox_api':
             token = backup_cfg.get('dropbox_api_token', '')
             if not token or token == _DROPBOX_TOKEN_PLACEHOLDER:
-                log_error(
-                    'backup failed — backend is dropbox_api but '
-                    f'dropbox_api_token is not set  track={track_name!r}'
-                )
+                reason = 'backend is dropbox_api but dropbox_api_token is not set'
+                log_error(f'backup failed — {reason}  track={track_name!r}')
+                _record_backup_failure(bot_token, chat_id, reason)
                 return
             base = backup_cfg.get('dropbox_base_path', '/Yoto Cards')
             dropbox_path = f'{base}/{_safe_dirname(playlist_title)}/{Path(file_path).name}'
-            _dropbox_upload(token, file_path, dropbox_path)
+            try:
+                _dropbox_upload(token, file_path, dropbox_path)
+            except Exception as e:
+                reason = f'Dropbox upload failed: {e}'
+                log_error(f'backup failed — {reason}  track={track_name!r}', exc=e)
+                _record_backup_failure(bot_token, chat_id, reason)
+                return
             log_activity(f'backup (dropbox api)  track={track_name!r}  dest={dropbox_path!r}')
             _record_backup_success(track_name, 'dropbox_api', dropbox_path)
             return
@@ -1650,7 +1725,9 @@ def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
         mode        = backup_cfg.get('mode', 'organized')
 
         if not backup_path:
-            log_error(f'backup failed — no path configured  track={track_name!r}')
+            reason = 'no backup.path configured for the local backend'
+            log_error(f'backup failed — {reason}  track={track_name!r}')
+            _record_backup_failure(bot_token, chat_id, reason)
             return
 
         if mode == 'organized':
@@ -1670,6 +1747,7 @@ def backup_track(file_path: str, track_name: str, playlist_title: str) -> None:
 
     except Exception as e:
         log_error(f'backup failed  track={track_name!r}', exc=e)
+        _record_backup_failure(bot_token, chat_id, f'unexpected error: {e}')
 
 
 def do_upload(bot_token: str, chat_id: int, msg_id: int,
@@ -1707,7 +1785,7 @@ def do_upload(bot_token: str, chat_id: int, msg_id: int,
     if ok:
         log_activity(f'upload success  track={track_name!r}  playlist={playlist_title!r}')
         record_recent_playlist(card.get('cardId') or card.get('id', ''), playlist_title)
-        backup_track(file_path, track_name, playlist_title)
+        backup_track(bot_token, chat_id, file_path, track_name, playlist_title)
         if err:   # non-empty = auto-strip warning
             tg_send(bot_token, chat_id, err)
         tg_send(bot_token, chat_id,
@@ -2046,7 +2124,7 @@ def _do_yt_batch_upload(bot_token: str, chat_id: int, card: dict,
             if msg:  # ok=True but carries a strip warning
                 tg_send(bot_token, chat_id, msg)
 
-            backup_track(file_path, title, card_title(card))
+            backup_track(bot_token, chat_id, file_path, title, card_title(card))
             log_activity(f'yt_batch track ok  {i}/{total}  {title!r}  playlist={card_title(card)!r}')
 
             # ── Progress notification (throttled for large batches) ────────

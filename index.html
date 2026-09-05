@@ -2771,6 +2771,19 @@ async function refreshBackupStatus() {
   try {
     const res  = await fetch('/local/backup-status');
     const data = await res.json();
+    // A live failure takes priority over the success age, and is shown
+    // even if a success is also on record -- the two aren't mutually
+    // exclusive (e.g. it worked yesterday, config broke since). This is
+    // also pushed as a Telegram alert (rate-limited) the moment it
+    // happens; the dashboard line is the passive confirmation, not the
+    // only way to find out.
+    if (data.last_failure_reason) {
+      el.textContent = `⚠️ Backup FAILING: ${data.last_failure_reason}`;
+      el.style.color = '#c0392b';
+      el.style.fontWeight = 'bold';
+      return;
+    }
+    el.style.fontWeight = 'normal';
     if (!data.last_success_at) {
       el.textContent = '💾 Backup: never';
       el.style.color = '#c0392b';
