@@ -61,7 +61,6 @@ try:
         TOKEN_FILE as _TG_TOKEN_FILE,
         QUEUE_FILE as _TG_QUEUE_FILE,
         yt_download_mp3 as _tg_yt_download_mp3,
-        transcode_to_ogg as _tg_transcode_to_ogg,
         _upload_core as _tg_upload_core,
         load_token as _tg_load_token,
     )
@@ -74,7 +73,6 @@ except ImportError as _e:
     def delete_queue_item(i): return False
     def save_to_queue(fp, tn): return {}
     def _tg_yt_download_mp3(url, title): raise RuntimeError('telegram_bot.py not available')
-    def _tg_transcode_to_ogg(path): raise RuntimeError('telegram_bot.py not available')
     def _tg_upload_core(fp, tn, card, token=None): return (False, 'telegram_bot.py not available')
     def _tg_load_token(): raise RuntimeError('telegram_bot.py not available')
 
@@ -374,15 +372,16 @@ class YotoHandler(http.server.SimpleHTTPRequestHandler):
                 if not re.search(r'(youtube\.com/watch|youtu\.be/)', yt_url):
                     self._send_json_response(400, b'{"error":"not a YouTube URL"}')
                     return True
+                # No local pre-transcode -- see TODO item 3 / transcode_to_ogg()'s
+                # docstring in telegram_bot.py: measured as actively harmful
+                # (21.3s vs 5.3s for the same track), not just unnecessary.
+                # This was a second, separate call site that fix never reached.
                 mp3_path = _tg_yt_download_mp3(yt_url, title)
-                ogg_path = _tg_transcode_to_ogg(mp3_path)
-                file_path = ogg_path if ogg_path else mp3_path
-                ok, err = _tg_upload_core(file_path, title, {'cardId': card_id})
-                # Clean up temp files (best-effort)
-                for p in [mp3_path, ogg_path]:
-                    if p:
-                        try: Path(p).unlink()
-                        except Exception: pass
+                ok, err = _tg_upload_core(mp3_path, title, {'cardId': card_id})
+                # Clean up temp file (best-effort)
+                if mp3_path:
+                    try: Path(mp3_path).unlink()
+                    except Exception: pass
                 if ok:
                     self._send_json_response(200, b'{"ok":true}')
                 else:
