@@ -61,23 +61,29 @@ You also need your **group's chat ID**. The easiest way: add `@userinfobot` to y
 
 ### 4. Configure the bot
 
-Copy the example config file:
+Run the interactive installer:
 
 ```
-cp bot_config.json.example bot_config.json
+python3 install.py
 ```
 
-Open `bot_config.json` in any text editor and fill in your values:
+It collects your Telegram token and chat ID, walks you through each optional
+feature (Apple Music search, track backup — local folder or Dropbox) asking
+whether to turn it on and only then asking for that feature's own details,
+writes `bot_config.json`, and then actually validates everything with real
+calls (Telegram's `getMe`, a real Yoto API call, a real Dropbox write+delete
+or local write+delete test, and checks that `yt-dlp`/a JS runtime/`ffmpeg`
+are present) rather than just trusting the file looks right.
 
-```json
-{
-  "telegram_bot_token": "1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ",
-  "allowed_group_id": -987654321
-}
-```
+It's safe to re-run any time — against an existing install it shows your
+current values (secrets masked) and pressing Enter keeps them; nothing is
+written until you confirm a summary of exactly what will change, and your
+previous config is backed up alongside the new one. Use `python3 install.py
+--config /path/to/other/bot_config.json` to point it at a different file.
 
-- `telegram_bot_token` — the token from BotFather
-- `allowed_group_id` — the chat ID of your Telegram group (the bot ignores messages from anywhere else)
+(If you'd rather edit the file by hand: copy `bot_config.json.example` to
+`bot_config.json` and fill in the fields it documents — `install.py` writes
+the same shape, it just validates as it goes.)
 
 ---
 
@@ -125,12 +131,11 @@ After picking a track, the bot downloads it, converts it to the right format, an
 - Make sure the bot has been added to the group as a member
 
 **Uploads are failing**
-- Your Yoto token may have expired — run `python3 setup.py` again to re-authenticate
-- Check that ffmpeg is installed and working: `ffmpeg -version`
-- The dashboard at `http://localhost:8765` shows recent activity and errors
+- Your Yoto token may have expired — log in again via the dashboard at `http://localhost:8765`, then run `python3 install.py` to confirm it with a real API call
+- The dashboard shows recent activity and errors
 
 **The dashboard says "Not authenticated"**
-- Run `python3 setup.py` to generate a fresh `yoto_token.json`
+- Log in via the dashboard at `http://localhost:8765` (it writes `yoto_token.json` itself); `python3 install.py` will confirm it worked
 
 ---
 
@@ -141,9 +146,10 @@ After picking a track, the bot downloads it, converts it to the right format, an
 | `server.py` | The local web server and API proxy |
 | `telegram_bot.py` | The Telegram bot logic |
 | `index.html` | The web dashboard |
-| `setup.py` | Run once to authenticate with Yoto |
+| `install.py` | Interactive install/reconfigure — collects config, walks each feature flag, validates everything with real calls |
+| `setup.py` | Authenticates the separate standalone `sync.py` script (not the bot itself — see below) |
 | `sync.py` | Standalone script for bulk syncing (optional) |
-| `bot_config.json.example` | Template for your bot configuration |
+| `bot_config.json.example` | Template for your bot configuration, documenting every field `install.py` can write |
 | `Start Yoto Manager.command` | Double-click to launch |
 | `restart_server.command` | Double-click to restart after a crash |
 
