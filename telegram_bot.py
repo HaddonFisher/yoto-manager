@@ -9,6 +9,7 @@ Phases implemented:
   4 — Audio upload pipeline (local file path → Yoto playlist)
   5 — Fuzzy card matching via difflib
 """
+from __future__ import annotations
 
 import base64
 import difflib

@@ -12,6 +12,7 @@ Routes:
 import base64
 import datetime
 import http.server
+import ipaddress
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -102,6 +103,17 @@ PROXY_ROUTES = {
 MAX_BODY_BYTES = 25 * 1024 * 1024
 
 
+
+def _is_lan_client(addr: str) -> bool:
+    """True for loopback or private (home-LAN) addresses."""
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
 class YotoHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
@@ -140,8 +152,8 @@ class YotoHandler(http.server.SimpleHTTPRequestHandler):
         """Reject non-localhost clients and (for state-changing endpoints)
         cross-origin browser requests that would otherwise bypass CORS for
         side-effect-only POSTs (CSRF defence)."""
-        if self.client_address[0] not in ('127.0.0.1', '::1'):
-            self.send_error(403, 'Local endpoints are localhost-only')
+        if not _is_lan_client(self.client_address[0]):
+            self.send_error(403, 'Local endpoints are LAN-only')
             return False
         if require_origin:
             origin = self.headers.get('Origin')
@@ -149,7 +161,9 @@ class YotoHandler(http.server.SimpleHTTPRequestHandler):
                 expected = f'http://localhost:{self.server.server_address[1]}'
                 # Allow either localhost or 127.0.0.1 form
                 expected_alt = f'http://127.0.0.1:{self.server.server_address[1]}'
-                if origin not in (expected, expected_alt):
+                # Also allow the dashboard served from this host's LAN address
+                expected_host = f"http://{self.headers.get('Host', '')}"
+                if origin not in (expected, expected_alt, expected_host):
                     self.send_error(403, 'Cross-origin request rejected')
                     return False
         return True
@@ -442,8 +456,8 @@ class YotoHandler(http.server.SimpleHTTPRequestHandler):
         whether the Telegram bot thread is still alive. Localhost-only, matching
         the security posture of the other local endpoints. Cheap and side-effect
         free — safe to poll frequently."""
-        if self.client_address[0] not in ('127.0.0.1', '::1'):
-            self.send_error(403, 'Health endpoint is localhost-only')
+        if not _is_lan_client(self.client_address[0]):
+            self.send_error(403, 'Health endpoint is LAN-only')
             return
         bot_alive = any(
             t.name == 'telegram-bot' and t.is_alive() for t in threading.enumerate()
