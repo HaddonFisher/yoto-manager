@@ -54,7 +54,7 @@ COVER_NAMES = ('cover.jpg', 'cover.jpeg', 'cover.png', 'folder.jpg', 'folder.jpe
 # "CD 1", "Disc2", "Disk 03", "Part 1" — folders that are pieces of one book.
 DISC_RE = re.compile(r'^\s*(cd|disc|disk|part)\s*[-_.]?\s*\d+\s*$', re.IGNORECASE)
 
-DEFAULT_AUDIOBOOKS_ROOT = '/Audiobooks'
+DEFAULT_AUDIOBOOKS_ROOT = '/audiobooks'   # Dropbox paths are case-insensitive
 
 
 class DropboxError(RuntimeError):

@@ -22,6 +22,6 @@
     "refresh_token": ""
   },
   "audiobooks": {
-    "root": "/Audiobooks"
+    "root": "/audiobooks"
   }
 }
