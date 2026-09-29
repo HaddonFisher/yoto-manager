@@ -31,7 +31,7 @@ It runs as a small Python process on one machine — your Mac, or a headless Lin
 
 ## Optional features
 
-Both are plain on/off flags in `bot_config.json`, and `install.py` will ask about each one.
+The first two are plain on/off flags in `bot_config.json`; `install.py` asks about each of these.
 
 ### `apple_music_enabled`
 
@@ -46,6 +46,12 @@ When enabled, every uploaded track is also copied somewhere else, organized into
 
 If a backup fails (bad token, unwritable path, etc.), the dashboard shows it and the bot sends you a Telegram message — it doesn't fail silently.
 
+### `/audiobook` (`dropbox` + `audiobooks.root`)
+
+`/audiobook` asks "Which book?" (or takes `/audiobook Title` directly), fuzzy-matches the title against folder names under `audiobooks.root` in Dropbox (default `/Audiobooks`; both `Book/` and `Author/Book/` layouts work, and `CD 1`/`Disc 2` subfolders fold into their book), and after you confirm, makes a Yoto card named after the folder — one track per file in filename order, `.m4b` files split at their chapter markers, anything over Yoto's 100 MB / 60 min track limit split into parts, and `cover.jpg` used as card art if the folder has one. Files are read through the Dropbox API (the folder doesn't need to be synced to the machine), downloaded to `/tmp` one at a time, and deleted afterwards. Audiobooks are not copied to the backup.
+
+It needs its own Dropbox app (separate from the backup token): `install.py`'s audiobook step walks you through a one-time sign-in and stores the app key, secret and a refresh token under `dropbox` in `bot_config.json`. Needs `ffmpeg`/`ffprobe` for splitting.
+
 ---
 
 ## What you'll need
@@ -55,6 +61,7 @@ If a backup fails (bad token, unwritable path, etc.), the dashboard shows it and
 - **A JS runtime** ([Deno](https://deno.com)) — current yt-dlp needs one to solve YouTube's extraction challenge
 - A **Yoto account** with cards already set up
 - A **Telegram bot token** from [@BotFather](https://t.me/BotFather)
+- **ffmpeg** (for `/audiobook` splitting)
 
 `install.py` checks all of these for you and tells you what's missing.
 
@@ -75,6 +82,7 @@ If a backup fails (bad token, unwritable path, etc.), the dashboard shows it and
 | File | Purpose |
 |---|---|
 | `telegram_bot.py` | The bot itself — search, selection, upload, backup |
+| `audiobooks.py` | `/audiobook` helpers: Dropbox client, book-folder matching, ffmpeg splitting |
 | `server.py` | Local HTTP server: the dashboard, Yoto login, health/status endpoints |
 | `index.html` | The web dashboard |
 | `install.py` | Interactive setup/reconfigure, with real validation |

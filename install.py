@@ -38,6 +38,8 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
+import audiobooks
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 DROPBOX_TOKEN_PLACEHOLDER = "REPLACE_ME"
 
@@ -220,9 +222,59 @@ def collect_backup(cfg: dict) -> dict:
     return cfg
 
 
+def collect_audiobooks(cfg: dict) -> dict:
+    """/audiobook reads the Dropbox Audiobooks folder through the API (it's
+    not synced to this host). That needs a Dropbox app's key + secret and a
+    long-lived refresh token, which this step gets with a one-time sign-in:
+    open a URL, approve, paste back the code. The bot then fetches
+    short-lived access tokens itself. Separate from the backup token."""
+    print("\n── Feature: /audiobook (audiobooks from Dropbox) ──")
+    dbx = dict(cfg.get("dropbox", {}))
+    connected = all(dbx.get(k) for k in ("app_key", "app_secret", "refresh_token"))
+    root = (cfg.get("audiobooks") or {}).get("root")
+    print(f"  currently: {'connected' if connected else 'not connected'}"
+          + (f", folder {root!r}" if root else ""))
+    question = ("Change the Dropbox sign-in or audiobooks folder?" if connected
+                else "Set up /audiobook now?")
+    if not ask_yes_no(question, default=not connected):
+        return cfg
+
+    print("  Needs a Dropbox app (dropbox.com/developers/apps) with Full Dropbox access")
+    print("  and the files.metadata.read + files.content.read permissions.")
+    old_key = dbx.get("app_key")
+    dbx["app_key"] = ask_value("Dropbox app key", current=dbx.get("app_key"))
+    dbx["app_secret"] = ask_value("Dropbox app secret", current=dbx.get("app_secret"), secret=True)
+
+    need_signin = (not dbx.get("refresh_token") or dbx["app_key"] != old_key
+                   or ask_yes_no("Sign in to Dropbox again?", default=False))
+    if need_signin and dbx["app_key"] and dbx["app_secret"]:
+        print("\n  1. Open this URL, sign in as the Dropbox account that has the audiobooks,")
+        print("     and click Allow:")
+        print(f"     {audiobooks.dropbox_authorize_url(dbx['app_key'])}")
+        code = input("  2. Paste the code Dropbox shows you: ").strip()
+        if code:
+            try:
+                data = audiobooks.dropbox_exchange_code(dbx["app_key"], dbx["app_secret"], code)
+                if data.get("refresh_token"):
+                    dbx["refresh_token"] = data["refresh_token"]
+                    print("  ✅ Dropbox connected.")
+                else:
+                    print("  ⚠️  Dropbox didn't return a refresh token -- not saved.")
+            except Exception as e:
+                print(f"  ⚠️  Sign-in failed: {e}")
+                print("     Nothing saved for the token; re-run this script to try again.")
+    cfg["dropbox"] = dbx
+
+    books = dict(cfg.get("audiobooks", {}))
+    books["root"] = ask_value("Audiobooks folder in Dropbox", current=books.get("root"),
+                              default=audiobooks.DEFAULT_AUDIOBOOKS_ROOT)
+    cfg["audiobooks"] = books
+    return cfg
+
+
 # ── Summary + confirm ─────────────────────────────────────────────────────
 
-SECRET_KEYS = {"telegram_bot_token", "dropbox_api_token"}
+SECRET_KEYS = {"telegram_bot_token", "dropbox_api_token", "app_secret", "refresh_token"}
 
 
 def _flat_view(cfg: dict, prefix: str = "") -> list[tuple[str, str]]:
@@ -345,6 +397,21 @@ def validate_dropbox(token: str, base_path: str) -> Result:
     return Result("Dropbox", "PASS", f"account {who}; wrote + removed a test file at {base_path}")
 
 
+def validate_audiobooks(cfg: dict) -> Result:
+    if not cfg.get("dropbox"):
+        return Result("Audiobooks (Dropbox)", "SKIP", "not set up")
+    root = audiobooks.audiobooks_root(cfg)
+    try:
+        client = audiobooks.client_from_config(cfg)
+        books = audiobooks.list_books(client, root, use_cache=False)
+    except Exception as e:
+        return Result("Audiobooks (Dropbox)", "FAIL", str(e))
+    if not books:
+        return Result("Audiobooks (Dropbox)", "WARN",
+                       f"signed in, but found no folders with audio files under {root!r}")
+    return Result("Audiobooks (Dropbox)", "PASS", f"{len(books)} book folder(s) under {root!r}")
+
+
 def validate_local_backup(path_str: str) -> Result:
     try:
         p = Path(path_str)
@@ -403,9 +470,8 @@ def check_js_runtime() -> Result:
 def check_ffmpeg() -> Result:
     if not shutil.which("ffmpeg"):
         return Result("ffmpeg", "WARN",
-                       "not found -- not required by any current code path (the local "
-                       "pre-transcode step was removed after measuring it made uploads "
-                       "slower, not faster), kept as a check in case that's revisited")
+                       "not found -- /audiobook needs ffmpeg + ffprobe to split .m4b files "
+                       "by chapter and anything over Yoto's 100 MB / 60 min track limit")
     try:
         r = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=10)
         first_line = r.stdout.splitlines()[0] if r.stdout else "present"
@@ -430,6 +496,8 @@ def run_validation(cfg: dict, config_dir: Path) -> list[Result]:
             results.append(validate_local_backup(backup.get("path", "")))
     else:
         results.append(Result("Backup", "SKIP", "feature disabled"))
+
+    results.append(validate_audiobooks(cfg))
 
     if cfg.get("apple_music_enabled"):
         if shutil.which("osascript"):
@@ -490,6 +558,7 @@ def main() -> int:
     note_yoto_auth(config_dir)
     cfg = collect_apple_music(cfg)
     cfg = collect_backup(cfg)
+    cfg = collect_audiobooks(cfg)
 
     if not show_summary_and_confirm(old_cfg, cfg):
         print("\nNothing written. Re-run any time.")

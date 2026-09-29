@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -33,6 +34,12 @@ import uuid
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
+
+import audiobooks
+
+# The system table maps .m4a to audio/mp4a-latm and doesn't know .m4b.
+mimetypes.add_type('audio/mp4', '.m4a')
+mimetypes.add_type('audio/mp4', '.m4b')
 
 # ── File paths (set by server.py before calling run_telegram_bot) ─────────
 TOKEN_FILE              = Path('yoto_token.json')
@@ -450,6 +457,9 @@ def _job_worker() -> None:
 
 def _process_job(job: dict) -> None:
     """Process a single job: download (if needed) + upload each track."""
+    if job.get('audiobook'):
+        _process_audiobook_job(job)
+        return
     bot_token = job['bot_token']
     chat_id   = job['chat_id']
     card      = job['card']
@@ -685,7 +695,16 @@ def run_telegram_bot(cfg: dict) -> None:
 
                 # ── Route message ────────────────────────────────────────
                 text_lower = text.lower().strip().lstrip('/')
-                if text_lower.startswith('retry'):
+                # A pending "Which book?" takes the next plain message as the
+                # title, even one that starts like a command word ("Finding…").
+                _pend = pending_matches.get((chat_id, from_uid))
+                if (_pend and _pend.get('type') == 'audiobook_ask'
+                        and not text.startswith('/')):
+                    handle_selection_reply(bot_token, chat_id, from_uid, msg_id, text)
+                elif text_lower.startswith('audiobook'):
+                    log_activity(f'cmd /audiobook  uid={from_uid}  chat={chat_id}  text={text[:120]!r}')
+                    handle_audiobook_command(bot_token, chat_id, from_uid, msg_id, text)
+                elif text_lower.startswith('retry'):
                     log_activity(f'cmd /retry  uid={from_uid}  chat={chat_id}')
                     last = _get_last_command(chat_id, from_uid)
                     if not last:
@@ -751,6 +770,8 @@ def handle_help(bot_token: str, chat_id: int, msg_id: int) -> None:
         '• `/findplay Query` — search YouTube for playlists; pick one to browse its tracks or add all\n'
         '• `/findplay Query | Playlist` — same, with Yoto playlist pre-specified\n'
         '• `/create Playlist Name` — create a new empty Yoto playlist\n'
+        '• `/audiobook` — pick a book from your Dropbox Audiobooks folder and make a card of it\n'
+        '• `/audiobook Title` — same, skipping the "Which book?" question\n'
         '• `/retry` — repeat your last /find, /findplay, or /create command\n'
         '• `help` or `/help` — show this message\n'
         '• `restart` or `/restart` — restart the server (reloads all code)\n'
@@ -1106,6 +1127,8 @@ def handle_selection_reply(bot_token: str, chat_id: int, from_uid: int,
         _handle_upload_failed_reply(bot_token, chat_id, from_uid, msg_id, text, pending)
     elif ptype == 'yt_playlist_pick':
         _handle_yt_playlist_pick_reply(bot_token, chat_id, from_uid, msg_id, text, pending)
+    elif ptype in ('audiobook_ask', 'audiobook_pick', 'audiobook_confirm'):
+        _handle_audiobook_reply(bot_token, chat_id, from_uid, msg_id, text, pending)
     else:
         _handle_upload_selection(bot_token, chat_id, from_uid, msg_id, text, pending)
 
@@ -1415,9 +1438,8 @@ def _upload_core(file_path: str, track_name: str, card: dict,
     Core upload logic — no Telegram messaging.
     Returns (True, '') on success or (False, error_message) on failure.
 
-    The GET /content → POST /content step is always wrapped in _CONTENT_LOCK
-    so concurrent callers (single-track upload from the polling thread,
-    parallel batches in worker threads) can't race when writing the same card.
+    Uploads + transcodes via _upload_media, then appends one chapter via
+    _append_chapters (which holds _CONTENT_LOCK around the GET → POST).
     """
     try:
         if token is None:
@@ -1425,158 +1447,8 @@ def _upload_core(file_path: str, track_name: str, card: dict,
         card_id = card.get('cardId') or card.get('id', '')
         if not card_id:
             raise RuntimeError(f'Card has no cardId/id: {str(card)[:200]}')
-        if not file_path:
-            raise RuntimeError('Empty file_path')
-        if not Path(file_path).exists():
-            raise RuntimeError(f'File not found: {file_path}')
-
-        file_bytes, filename = get_file_bytes(file_path)
-        if not file_bytes:
-            raise RuntimeError(f'File is empty (0 bytes): {file_path}')
-        encoded_filename = urllib.parse.quote(filename)
-
-        # Step 1: Get a fresh upload slot (no sha256 param per Yoto API docs)
-        upload_info = yoto_get(
-            token,
-            f'/media/transcode/audio/uploadUrl?filename={encoded_filename}',
-        )
-        upload_data = upload_info.get('upload', upload_info)
-        upload_id   = upload_data.get('uploadId') or upload_data.get('id', '')
-        upload_url  = upload_data.get('uploadUrl')
-        if not upload_url:
-            raise RuntimeError(f'Yoto API returned no uploadUrl for {filename!r}')
-        if not upload_id:
-            raise RuntimeError(f'Yoto API returned no uploadId for {filename!r}')
-
-        # Step 2: PUT file to S3
-        s3_req = urllib.request.Request(upload_url, data=file_bytes, method='PUT')
-        mime_type = mimetypes.guess_type(filename)[0] or 'audio/mpeg'
-        s3_req.add_header('Content-Type', mime_type)
-        s3_req.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-        # Generous timeout — large tracks over a slow link can take a while,
-        # but a stuck S3 socket must eventually unblock so we don't wedge.
-        with urllib.request.urlopen(s3_req, timeout=300) as resp:
-            print(f'  ☁️   S3 PUT {resp.status} for {filename}')
-        log_activity(f'_upload_core: S3 PUT OK  upload_id={upload_id!r}')
-
-        # Step 3: Poll until Yoto finishes transcoding the uploaded file.
-        # Log every distinct response so we can see the real field names/structure.
-        # Check transcodedSha256 at both the top level and one wrapper level deep
-        # (the API may return { transcodedSha256, transcodedInfo } or wrap it under
-        # a key like 'upload' or 'media').
-        transcoded = None
-        last_raw   = None
-        for attempt in range(600):
-            if attempt > 0:
-                time.sleep(1.0)
-            result   = yoto_get(
-                token,
-                f'/media/upload/{upload_id}/transcoded?loudnorm=false',
-            )
-            raw_repr = json.dumps(result, sort_keys=True)[:600]
-            if raw_repr != last_raw:
-                log_activity(f'_upload_core: poll [{attempt + 1}] {raw_repr}')
-                print(f'  🔄  poll [{attempt + 1}] {raw_repr}')
-                last_raw = raw_repr
-
-            # Accept the hash at the top level or one dict level down
-            wrapper      = next((result[k] for k in result if isinstance(result.get(k), dict)), {})
-            sha256_val   = result.get('transcodedSha256') or wrapper.get('transcodedSha256')
-            info_val     = result.get('transcodedInfo')   or wrapper.get('transcodedInfo') or {}
-
-            if sha256_val:
-                transcoded = {'transcodedSha256': sha256_val, 'transcodedInfo': info_val}
-                log_activity(
-                    f'_upload_core: transcoded after {attempt + 1} poll(s)  '
-                    f'sha256={sha256_val[:12]}…'
-                )
-                break
-
-        if not transcoded:
-            raise RuntimeError(
-                f'Transcoding did not complete after 600 polls for {filename!r}'
-            )
-
-        # Step 4: Build trackUrl from transcodedSha256 and collect transcodedInfo
-        transcoded_sha256 = transcoded['transcodedSha256']
-        track_url = f'yoto:#{transcoded_sha256}'
-        info = transcoded['transcodedInfo']
-
-        # ── Serialised read-modify-write: prevents concurrent callers from
-        #    interleaving GET /content/{id} → POST /content and clobbering
-        #    each other's chapter lists.
-        with _CONTENT_LOCK:
-            card_data = yoto_get(token, f'/content/{card_id}')
-            card_obj  = card_data.get('card', card_data)
-            chapters  = card_obj.get('content', {}).get('chapters', []) or []
-
-            # Preserve the full existing metadata (artwork, description, etc.)
-            # Only set title if the card doesn't already have one.
-            card_metadata = dict(card_obj.get('metadata', {}))
-            if not card_metadata.get('title'):
-                card_metadata['title'] = card_obj.get('title') or ''
-
-            chapter_index = len(chapters)
-            chapter_key   = str(chapter_index).zfill(2)
-            track_obj = {
-                'key':      chapter_key + '1',
-                'title':    track_name,
-                'type':     'audio',
-                'trackUrl': track_url,
-            }
-            for field in ('duration', 'fileSize', 'channels', 'format'):
-                if info.get(field) is not None:
-                    track_obj[field] = info[field]
-            new_chapter = {
-                'key':          chapter_key,
-                'title':        track_name,
-                'overlayLabel': str(chapter_index + 1),
-                'tracks':       [track_obj],
-            }
-            chapters.append(new_chapter)
-
-            # POST with automatic retry: if an existing chapter references a media file
-            # Yoto can't find (stale upload from before the S3 bug fix), strip it and
-            # retry once rather than failing the whole upload.
-            auto_stripped = []
-            for attempt in range(2):
-                try:
-                    yoto_post(token, '/content', {
-                        'cardId':   card_id,
-                        'content':  {'chapters': chapters},
-                        'metadata': card_metadata,
-                    })
-                    break   # success
-                except RuntimeError as post_err:
-                    err_str = str(post_err)
-                    if attempt == 0 and 'Media file not found' in err_str:
-                        # Parse the JSON body to get the clean track title
-                        bad_title = None
-                        json_start = err_str.find('{')
-                        if json_start >= 0:
-                            try:
-                                parsed    = json.loads(err_str[json_start:])
-                                api_msg   = parsed.get('error', {}).get('message', '')
-                                title_hit = re.search(r'The track "([^"]+)"', api_msg)
-                                if title_hit:
-                                    bad_title = title_hit.group(1)
-                            except Exception:
-                                pass
-                        if bad_title:
-                            log_error(
-                                f'_upload_core: stripping unplayable chapter '
-                                f'{bad_title!r} from card {card_id} and retrying',
-                            )
-                            auto_stripped.append(bad_title)
-                            chapters = [
-                                ch for ch in chapters
-                                if not any(t.get('title') == bad_title
-                                           for t in ch.get('tracks', []))
-                                and ch.get('title') != bad_title
-                            ]
-                            continue  # retry with bad chapter removed
-                    raise   # non-recoverable — propagate
-
+        media = _upload_media(file_path, token)
+        auto_stripped = _append_chapters(token, card_id, [(track_name, media)])
         warning = (f'⚠️ Removed unplayable track(s) from playlist: '
                    + ', '.join(f'"{t}"' for t in auto_stripped)) if auto_stripped else ''
         log_activity(
@@ -1591,6 +1463,175 @@ def _upload_core(file_path: str, track_name: str, card: dict,
             exc=e,
         )
         return False, str(e)
+
+
+def _upload_media(file_path: str, token: dict, max_polls: int = 600) -> dict:
+    """Upload one audio file to Yoto and wait for it to transcode.
+    Returns {'trackUrl': 'yoto:#…', 'info': transcodedInfo}. Raises on failure.
+
+    The file is streamed from disk (not read into memory) — audiobook
+    pieces can be ~100 MB each.
+    """
+    if not file_path:
+        raise RuntimeError('Empty file_path')
+    if not Path(file_path).exists():
+        raise RuntimeError(f'File not found: {file_path}')
+
+    path, filename, size = get_file_source(file_path)
+    if not size:
+        raise RuntimeError(f'File is empty (0 bytes): {file_path}')
+    encoded_filename = urllib.parse.quote(filename)
+
+    # Step 1: Get a fresh upload slot (no sha256 param per Yoto API docs)
+    upload_info = yoto_get(
+        token,
+        f'/media/transcode/audio/uploadUrl?filename={encoded_filename}',
+    )
+    upload_data = upload_info.get('upload', upload_info)
+    upload_id   = upload_data.get('uploadId') or upload_data.get('id', '')
+    upload_url  = upload_data.get('uploadUrl')
+    if not upload_url:
+        raise RuntimeError(f'Yoto API returned no uploadUrl for {filename!r}')
+    if not upload_id:
+        raise RuntimeError(f'Yoto API returned no uploadId for {filename!r}')
+
+    # Step 2: PUT file to S3, streamed from disk with an explicit length
+    mime_type = mimetypes.guess_type(filename)[0] or 'audio/mpeg'
+    with open(path, 'rb') as fh:
+        s3_req = urllib.request.Request(upload_url, data=fh, method='PUT')
+        s3_req.add_header('Content-Type', mime_type)
+        s3_req.add_header('Content-Length', str(size))
+        s3_req.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+        # Generous timeout — large tracks over a slow link can take a while,
+        # but a stuck S3 socket must eventually unblock so we don't wedge.
+        with urllib.request.urlopen(s3_req, timeout=300) as resp:
+            print(f'  ☁️   S3 PUT {resp.status} for {filename}')
+    log_activity(f'_upload_media: S3 PUT OK  upload_id={upload_id!r}  bytes={size}')
+
+    # Step 3: Poll until Yoto finishes transcoding the uploaded file.
+    # Log every distinct response so we can see the real field names/structure.
+    # Check transcodedSha256 at both the top level and one wrapper level deep
+    # (the API may return { transcodedSha256, transcodedInfo } or wrap it under
+    # a key like 'upload' or 'media').
+    last_raw = None
+    for attempt in range(max_polls):
+        if attempt > 0:
+            time.sleep(1.0)
+        result   = yoto_get(
+            token,
+            f'/media/upload/{upload_id}/transcoded?loudnorm=false',
+        )
+        raw_repr = json.dumps(result, sort_keys=True)[:600]
+        if raw_repr != last_raw:
+            log_activity(f'_upload_media: poll [{attempt + 1}] {raw_repr}')
+            print(f'  🔄  poll [{attempt + 1}] {raw_repr}')
+            last_raw = raw_repr
+
+        # Accept the hash at the top level or one dict level down
+        wrapper      = next((result[k] for k in result if isinstance(result.get(k), dict)), {})
+        sha256_val   = result.get('transcodedSha256') or wrapper.get('transcodedSha256')
+        info_val     = result.get('transcodedInfo')   or wrapper.get('transcodedInfo') or {}
+
+        if sha256_val:
+            log_activity(
+                f'_upload_media: transcoded after {attempt + 1} poll(s)  '
+                f'sha256={sha256_val[:12]}…'
+            )
+            # Step 4: trackUrl is built from transcodedSha256
+            return {'trackUrl': f'yoto:#{sha256_val}', 'info': info_val}
+
+    raise RuntimeError(
+        f'Transcoding did not complete after {max_polls} polls for {filename!r}'
+    )
+
+
+def _append_chapters(token: dict, card_id: str, items: list,
+                     cover_url: str = '') -> list:
+    """Append chapters to a card in one GET → POST.
+
+    items is [(title, media)] where media comes from _upload_media.
+    cover_url, if given, is set as the card art only when the card has none.
+    Returns the titles of any existing chapters that had to be auto-stripped
+    because Yoto reported their media missing. Raises on failure.
+    """
+    # ── Serialised read-modify-write: prevents concurrent callers from
+    #    interleaving GET /content/{id} → POST /content and clobbering
+    #    each other's chapter lists.
+    with _CONTENT_LOCK:
+        card_data = yoto_get(token, f'/content/{card_id}')
+        card_obj  = card_data.get('card', card_data)
+        chapters  = card_obj.get('content', {}).get('chapters', []) or []
+
+        # Preserve the full existing metadata (artwork, description, etc.)
+        # Only set title if the card doesn't already have one.
+        card_metadata = dict(card_obj.get('metadata', {}))
+        if not card_metadata.get('title'):
+            card_metadata['title'] = card_obj.get('title') or ''
+        if cover_url and not (card_metadata.get('cover') or {}).get('imageL'):
+            card_metadata['cover'] = {**(card_metadata.get('cover') or {}), 'imageL': cover_url}
+
+        for track_name, media in items:
+            info          = media.get('info') or {}
+            chapter_index = len(chapters)
+            chapter_key   = str(chapter_index).zfill(2)
+            track_obj = {
+                'key':      chapter_key + '1',
+                'title':    track_name,
+                'type':     'audio',
+                'trackUrl': media['trackUrl'],
+            }
+            for field in ('duration', 'fileSize', 'channels', 'format'):
+                if info.get(field) is not None:
+                    track_obj[field] = info[field]
+            chapters.append({
+                'key':          chapter_key,
+                'title':        track_name,
+                'overlayLabel': str(chapter_index + 1),
+                'tracks':       [track_obj],
+            })
+
+        # POST with automatic retry: if an existing chapter references a media file
+        # Yoto can't find (stale upload from before the S3 bug fix), strip it and
+        # retry once rather than failing the whole upload.
+        auto_stripped = []
+        for attempt in range(2):
+            try:
+                yoto_post(token, '/content', {
+                    'cardId':   card_id,
+                    'content':  {'chapters': chapters},
+                    'metadata': card_metadata,
+                })
+                break   # success
+            except RuntimeError as post_err:
+                err_str = str(post_err)
+                if attempt == 0 and 'Media file not found' in err_str:
+                    # Parse the JSON body to get the clean track title
+                    bad_title = None
+                    json_start = err_str.find('{')
+                    if json_start >= 0:
+                        try:
+                            parsed    = json.loads(err_str[json_start:])
+                            api_msg   = parsed.get('error', {}).get('message', '')
+                            title_hit = re.search(r'The track "([^"]+)"', api_msg)
+                            if title_hit:
+                                bad_title = title_hit.group(1)
+                        except Exception:
+                            pass
+                    if bad_title:
+                        log_error(
+                            f'_append_chapters: stripping unplayable chapter '
+                            f'{bad_title!r} from card {card_id} and retrying',
+                        )
+                        auto_stripped.append(bad_title)
+                        chapters = [
+                            ch for ch in chapters
+                            if not any(t.get('title') == bad_title
+                                       for t in ch.get('tracks', []))
+                            and ch.get('title') != bad_title
+                        ]
+                        continue  # retry with bad chapter removed
+                raise   # non-recoverable — propagate
+    return auto_stripped
 
 
 def _safe_dirname(name: str) -> str:
@@ -1829,6 +1870,447 @@ def do_upload(bot_token: str, chat_id: int, msg_id: int,
     else:
         log_error(f'upload failed  track={track_name!r}  playlist={playlist_title!r}  err={err}')
         _offer_queue_button(f'❌ Upload failed: `{err}`')
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /audiobook — Dropbox audiobook folder → Yoto card
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Flow: /audiobook [title] → (ask "Which book?") → fuzzy-match folder names
+# under the configured Dropbox root → one strong match goes to a confirm
+# step, several become buttons, none lets him type another title → confirm
+# queues a background job (_process_audiobook_job) that downloads each file
+# to a temp dir, splits it for Yoto's limits, uploads, and saves every
+# chapter to the card in one update at the end.
+#
+# Pending types: audiobook_ask → audiobook_pick → audiobook_confirm.
+# Button callback data is short and positional ('ab:3' = 4th saved match)
+# to stay well inside Telegram's 64-byte callback_data limit.
+
+def _md(text) -> str:
+    """Escape Telegram legacy-Markdown specials in Dropbox/user-supplied text."""
+    return re.sub(r'([_*`\[])', r'\\\1', str(text))
+
+
+def _b(text) -> str:
+    """Bold a Dropbox/user-supplied name. Legacy Markdown can't escape inside
+    an entity, so the only character that could break it (*) is dropped."""
+    return '*' + str(text).replace('*', '') + '*'
+
+
+def _fmt_size(n: int) -> str:
+    if n >= 1024 ** 3:
+        return f'{n / 1024 ** 3:.1f} GB'
+    return f'{n / 1024 ** 2:.0f} MB'
+
+
+def _read_bot_config() -> dict:
+    return json.loads(Path('bot_config.json').read_text(encoding='utf-8'))
+
+
+def tg_send_force_reply(bot_token: str, chat_id: int, text: str,
+                        placeholder: str = '', reply_to: int = None) -> None:
+    """Send a message that opens the reply box in Telegram (ForceReply)."""
+    if _allowed_send_ids and chat_id not in _allowed_send_ids:
+        print(f'  🚫  tg_send_force_reply: blocked outbound to unauthorized chat_id={chat_id}')
+        return
+    markup = {'force_reply': True, 'selective': True}
+    if placeholder:
+        markup['input_field_placeholder'] = placeholder[:64]
+    payload = {'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown',
+               'reply_markup': markup}
+    if reply_to:
+        payload['reply_to_message_id'] = reply_to
+    try:
+        tg_request(bot_token, 'sendMessage', payload)
+    except Exception as e:
+        print(f'  ⚠️  Telegram sendMessage (force reply) failed: {e}')
+
+
+def handle_audiobook_command(bot_token: str, chat_id: int, from_uid: int,
+                             msg_id: int, text: str) -> None:
+    """/audiobook [Title]"""
+    rest = re.sub(r'^/?audiobooks?(@\S+)?\s*', '', text, flags=re.IGNORECASE).strip()
+    if rest:
+        _audiobook_search(bot_token, chat_id, from_uid, msg_id, rest)
+    else:
+        _audiobook_ask(bot_token, chat_id, from_uid, msg_id)
+
+
+def _audiobook_ask(bot_token: str, chat_id: int, from_uid: int, msg_id: int,
+                   prompt: str = '📚 Which book?') -> None:
+    tg_send_force_reply(bot_token, chat_id, prompt, placeholder='Book title',
+                        reply_to=msg_id)
+    store_pending(chat_id, from_uid, '', '', [], type='audiobook_ask')
+
+
+def _audiobook_search(bot_token: str, chat_id: int, from_uid: int,
+                      msg_id: int, query: str) -> None:
+    log_activity(f'audiobook search  query={query!r}')
+    try:
+        cfg    = _read_bot_config()
+        root   = audiobooks.audiobooks_root(cfg)
+        client = audiobooks.client_from_config(cfg)
+        books  = audiobooks.list_books(client, root)
+    except audiobooks.DropboxNotConfigured as e:
+        pending_matches.pop((chat_id, from_uid), None)
+        _save_pending()
+        tg_send(bot_token, chat_id, f'⚙️ {_md(e)}', reply_to=msg_id)
+        return
+    except Exception as e:
+        log_error(f'audiobook search failed  query={query!r}  err={e}', exc=e)
+        pending_matches.pop((chat_id, from_uid), None)
+        _save_pending()
+        tg_send(bot_token, chat_id,
+                f'❌ Could not read your Dropbox audiobooks: `{str(e)[:200].replace("`", "")}`',
+                reply_to=msg_id)
+        return
+
+    matches = audiobooks.match_books(query, books)
+    kind    = audiobooks.classify_matches(matches)
+    log_activity(f'audiobook search  query={query!r}  books={len(books)}  '
+                 f'kind={kind}  top={[round(s, 2) for s, _ in matches[:3]]}')
+
+    if kind == 'none':
+        tg_send_keyboard(
+            bot_token, chat_id,
+            f'🤷 No audiobook folder matches {_b(query)} in `{root}`.\n'
+            'Type another title to try again.',
+            [[('❌ Cancel', 'cancel')]], reply_to=msg_id,
+        )
+        store_pending(chat_id, from_uid, '', '', [], type='audiobook_ask')
+        return
+
+    if kind == 'strong':
+        _audiobook_confirm(bot_token, chat_id, from_uid, msg_id, matches[0][1])
+        return
+
+    found = [b for _, b in matches]
+    buttons = []
+    for i, b in enumerate(found):
+        label = b['name'] + (f' — {b["parent"]}' if b['parent'] else '')
+        if len(label) > 60:
+            label = label[:59] + '…'
+        buttons.append([(label, f'ab:{i}')])
+    buttons += [[('🔁 Search again', 'ab_again')], [('❌ Cancel', 'cancel')]]
+    header = (f'📚 {len(found)} books match {_b(query)} — which one?' if len(found) > 1
+              else f'📚 Closest match for {_b(query)} — is this it?')
+    tg_send_keyboard(bot_token, chat_id, header,
+                     buttons, reply_to=msg_id)
+    store_pending(chat_id, from_uid, '', '', [], type='audiobook_pick',
+                  books=found, query=query)
+
+
+def _audiobook_confirm(bot_token: str, chat_id: int, from_uid: int,
+                       msg_id: int, book: dict) -> None:
+    existing = None
+    try:
+        card = find_card_exact(book['name'], fetch_cards())
+        if card:
+            existing = {'cardId': card.get('cardId') or card.get('id'),
+                        'title': card_title(card)}
+    except Exception as e:
+        # Non-fatal: worst case he gets a new card instead of the add option.
+        log_error(f'audiobook confirm: could not check existing cards: {e}', exc=e)
+
+    files = book['files']
+    n     = len(files)
+    lines = [
+        f'📚 {_b(book["name"])}' + (f' — {_md(book["parent"])}' if book['parent'] else ''),
+        f'{n} file{"s" if n != 1 else ""}, {_fmt_size(book["size"])}',
+    ]
+    if any(f['name'].lower().endswith('.m4b') for f in files):
+        lines.append('M4B files will be split into tracks at their chapter markers.')
+    if any(f['size'] > audiobooks.TARGET_TRACK_BYTES for f in files):
+        lines.append('Files over Yoto\'s 100 MB / 60 min track limit will be split.')
+    lines.append('Cover: ' + (_md(book['cover']['path'].rsplit('/', 1)[-1])
+                              if book.get('cover') else 'none found'))
+    if n > audiobooks.YOTO_MAX_CARD_TRACKS:
+        lines.append(f'⚠️ More than {audiobooks.YOTO_MAX_CARD_TRACKS} files — a Yoto card '
+                     f'holds {audiobooks.YOTO_MAX_CARD_TRACKS} tracks, so the rest will be skipped.')
+    if book['size'] > audiobooks.YOTO_MAX_CARD_BYTES:
+        lines.append('⚠️ Bigger than 500 MB — Yoto may refuse a card this large.')
+
+    if existing:
+        lines.append(f'\nYou already have a card called {_b(existing["title"])}.')
+        buttons = [[('➕ Add to existing card', 'ab_add')],
+                   [('🆕 Create a new card', 'ab_new')]]
+    else:
+        lines.append(f'\nThis will create a new card {_b(book["name"])}.')
+        buttons = [[('✅ Upload', 'ab_new')]]
+    buttons.append([('❌ Cancel', 'cancel')])
+
+    tg_send_keyboard(bot_token, chat_id, '\n'.join(lines), buttons, reply_to=msg_id)
+    store_pending(chat_id, from_uid, '', '', [], type='audiobook_confirm',
+                  book=book, existing_card=existing)
+
+
+def _handle_audiobook_reply(bot_token: str, chat_id: int, from_uid: int,
+                            msg_id: int, text: str, pending: dict) -> None:
+    key     = (chat_id, from_uid)
+    ptype   = pending.get('type')
+    cleaned = text.strip()
+    low     = cleaned.lower().lstrip('/')
+
+    def _clear() -> None:
+        pending_matches.pop(key, None)
+        _save_pending()
+
+    if low == 'cancel':
+        _clear()
+        tg_send(bot_token, chat_id, '👍 Cancelled.', reply_to=msg_id)
+        return
+
+    if low == 'ab_again':
+        _clear()
+        _audiobook_ask(bot_token, chat_id, from_uid, msg_id)
+        return
+
+    if ptype == 'audiobook_ask':
+        if cleaned:
+            _clear()
+            _audiobook_search(bot_token, chat_id, from_uid, msg_id, cleaned)
+        return
+
+    if ptype == 'audiobook_pick':
+        if low.startswith('ab:'):
+            books = pending.get('books') or []
+            try:
+                idx = int(low[3:])
+            except ValueError:
+                return
+            if not 0 <= idx < len(books):
+                tg_send(bot_token, chat_id, '❌ That choice is no longer available.',
+                        reply_to=msg_id)
+                return
+            _clear()
+            _audiobook_confirm(bot_token, chat_id, from_uid, msg_id, books[idx])
+        elif cleaned and not low.startswith('ab'):
+            # Typed a different title instead of tapping a button.
+            _clear()
+            _audiobook_search(bot_token, chat_id, from_uid, msg_id, cleaned)
+        return
+
+    if ptype == 'audiobook_confirm' and low in ('ab_new', 'ab_add'):
+        book     = pending['book']
+        existing = pending.get('existing_card') if low == 'ab_add' else None
+        _clear()
+        ahead = _JOB_QUEUE.qsize() + (1 if _JOB_QUEUE.unfinished_tasks else 0)
+        _JOB_QUEUE.put({
+            'bot_token': bot_token, 'chat_id': chat_id,
+            'audiobook': book, 'card': existing, 'create_name': book['name'],
+        })
+        log_activity(f'audiobook queued  book={book["path"]!r}  '
+                     f'files={len(book["files"])}  existing={bool(existing)}')
+        where = f'into {_b(existing["title"])}' if existing else 'as a new card'
+        wait  = (f'\n_(Starts after {ahead} other job{"s" if ahead != 1 else ""}.)_'
+                 if ahead else '')
+        tg_send(bot_token, chat_id,
+                f'✅ Queued {_b(book["name"])} {where}. '
+                f'I\'ll keep one progress message updated.{wait}',
+                reply_to=msg_id)
+
+
+class _AudiobookProgress:
+    """One Telegram message edited in place, throttled so a long book
+    doesn't hit Telegram's edit rate limits."""
+    MIN_INTERVAL = 3.0
+
+    def __init__(self, bot_token: str, chat_id: int, header: str):
+        self.bot_token, self.chat_id, self.header = bot_token, chat_id, header
+        self.msg_id = tg_send_keyboard_ret(bot_token, chat_id, f'{header}\n⏳ Starting…', [])
+        self._last = 0.0
+
+    def update(self, line: str, force: bool = False) -> None:
+        now = time.time()
+        if not self.msg_id or (not force and now - self._last < self.MIN_INTERVAL):
+            return
+        self._last = now
+        tg_edit_message(self.bot_token, self.chat_id, self.msg_id,
+                        f'{self.header}\n{line}', [])
+
+
+def _upload_cover_image(token: dict, image_path: Path) -> str:
+    """POST an image to Yoto's cover-image endpoint; returns its mediaUrl
+    (goes in metadata.cover.imageL). See yoto.dev/myo/uploading-cover-images."""
+    ctype = mimetypes.guess_type(image_path.name)[0] or 'image/jpeg'
+    data  = image_path.read_bytes()   # cover images are small
+
+    def _do(tok: dict) -> dict:
+        req = urllib.request.Request(
+            YOTO_API + '/media/coverImage/user/me/upload?autoconvert=true&coverType=default',
+            data=data, method='POST',
+            headers={'Authorization': f'Bearer {tok["access_token"]}',
+                     'Content-Type': ctype},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return json.loads(resp.read())
+
+    try:
+        result = _do(token)
+    except urllib.error.HTTPError as e:
+        if e.code not in (401, 403):
+            raise RuntimeError(f'cover upload → {e.code}: '
+                               f'{e.read()[:200].decode(errors="replace")}') from e
+        token.update(refresh_yoto_token(token))
+        result = _do(token)
+    url = (result.get('coverImage') or {}).get('mediaUrl')
+    if not url:
+        raise RuntimeError(f'cover upload returned no mediaUrl: {str(result)[:200]}')
+    return url
+
+
+def _process_audiobook_job(job: dict) -> None:
+    """Background job: Dropbox → /tmp (chunked) → split → Yoto, then one
+    card update with every chapter. Temp files are always removed."""
+    global _card_cache
+    bot_token = job['bot_token']
+    chat_id   = job['chat_id']
+    book      = job['audiobook']
+    card      = job.get('card')
+    name      = job.get('create_name') or book['name']
+    files     = book['files']
+
+    try:
+        token = load_token()
+    except TokenMissingError:
+        tg_send(bot_token, chat_id, '❌ No Yoto token — open the dashboard and log in first.')
+        return
+    try:
+        client = audiobooks.client_from_config(_read_bot_config())
+    except Exception as e:
+        tg_send(bot_token, chat_id, f'❌ {_md(e)}')
+        return
+
+    log_activity(f'audiobook job start  book={book["path"]!r}  files={len(files)}')
+    progress = _AudiobookProgress(bot_token, chat_id, f'📚 {_b(name)}')
+
+    room = audiobooks.YOTO_MAX_CARD_TRACKS
+    if card:
+        try:
+            data = yoto_get(token, f'/content/{card["cardId"]}')
+            room -= len((data.get('card', data).get('content') or {}).get('chapters') or [])
+        except Exception as e:
+            log_error(f'audiobook: could not read existing card chapters: {e}', exc=e)
+
+    uploaded: list = []     # [(title, media)] in card order
+    failed:   list = []     # [(name, error)]
+    stopped   = ''
+    cover_url = ''
+    saved, save_err, stripped = False, '', []
+    workdir   = Path(tempfile.mkdtemp(prefix='yoto_audiobook_', dir='/tmp'))
+    try:
+        try:
+            for i, f in enumerate(files, 1):
+                if len(uploaded) >= room:
+                    stopped = f'the card is full ({audiobooks.YOTO_MAX_CARD_TRACKS} tracks)'
+                    break
+                label = f'{i}/{len(files)}'
+                local = workdir / f'{i:03d}{Path(f["name"]).suffix.lower()}'
+
+                def _dl_progress(done: int, total: int, _label=label, _name=f['name']) -> None:
+                    pct = f' — {done * 100 // total}%' if total else ''
+                    progress.update(f'⬇️ {_label} Downloading {_md(_name)}{pct}')
+
+                try:
+                    progress.update(f'⬇️ {label} Downloading {_md(f["name"])}', force=True)
+                    client.download(f['id'], local, _dl_progress)
+                    progress.update(f'✂️ {label} Preparing {_md(f["name"])}', force=True)
+                    pieces = audiobooks.prepare_tracks(
+                        local, audiobooks.clean_track_title(f['name']),
+                        workdir / f'{i:03d}-parts')
+                except Exception as e:
+                    log_error(f'audiobook file failed  file={f["path"]!r}  err={e}', exc=e)
+                    failed.append((f['name'], str(e)))
+                    local.unlink(missing_ok=True)
+                    continue
+
+                for j, (piece, title) in enumerate(pieces, 1):
+                    if len(uploaded) >= room:
+                        stopped = f'the card is full ({audiobooks.YOTO_MAX_CARD_TRACKS} tracks)'
+                        break
+                    part = f' ({j}/{len(pieces)})' if len(pieces) > 1 else ''
+                    progress.update(f'⏫ {label}{part} Uploading {_md(title)}\n'
+                                    f'{len(uploaded)} track(s) done', force=True)
+                    err = None
+                    for attempt in range(3):
+                        try:
+                            # Long pieces take Yoto longer to transcode.
+                            media = _upload_media(str(piece), token, max_polls=1800)
+                            err = None
+                            break
+                        except Exception as e:
+                            err = e
+                            if attempt < 2:
+                                time.sleep(5 * (attempt + 1))
+                    if err:
+                        log_error(f'audiobook upload failed  track={title!r}  err={err}', exc=err)
+                        failed.append((title, str(err)))
+                    else:
+                        uploaded.append((title, media))
+                    if piece != local:
+                        piece.unlink(missing_ok=True)
+                local.unlink(missing_ok=True)
+                if stopped:
+                    break
+
+            if book.get('cover') and uploaded:
+                try:
+                    img = workdir / ('cover' + Path(book['cover']['path']).suffix.lower())
+                    client.download(book['cover']['id'], img)
+                    cover_url = _upload_cover_image(token, img)
+                except Exception as e:
+                    log_error(f'audiobook cover failed  book={book["path"]!r}  err={e}', exc=e)
+                    failed.append(('cover image', str(e)))
+        except Exception as e:
+            log_error(f'audiobook job aborted  book={book["path"]!r}  err={e}', exc=e)
+            stopped = str(e)
+
+        # One card update for everything that made it — including a partial
+        # run, so work already uploaded isn't thrown away.
+        if uploaded:
+            progress.update(f'💾 Saving {len(uploaded)} track(s) to the card…', force=True)
+            try:
+                if not card:
+                    created = create_playlist(token, name)
+                    _card_cache = None
+                    card = {'cardId': created.get('cardId') or created.get('id'),
+                            'title': name}
+                stripped = _append_chapters(token, card['cardId'], uploaded, cover_url=cover_url)
+                saved = True
+                record_recent_playlist(card['cardId'], card.get('title') or name)
+            except Exception as e:
+                log_error(f'audiobook save failed  book={book["path"]!r}  err={e}', exc=e)
+                save_err = str(e)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+    def _clean(s: str) -> str:
+        return s[:150].replace('`', "'")
+
+    if saved:
+        lines = [f'✅ {_b(name)} — {len(uploaded)} track{"s" if len(uploaded) != 1 else ""} '
+                 f'added' + (' to the existing card' if job.get('card') else ' to a new card')
+                 + (' with cover art' if cover_url else '') + '.']
+    elif uploaded:
+        lines = [f'❌ Uploaded {len(uploaded)} track(s) but could not save them to the card: '
+                 f'`{_clean(save_err)}`']
+    else:
+        lines = [f'❌ {_b(name)} — nothing was uploaded.']
+    if stripped:
+        lines.append('⚠️ Removed unplayable track(s) already on the card: '
+                     + ', '.join(f'"{_md(t)}"' for t in stripped))
+    if stopped:
+        lines.append(f'⚠️ Stopped early: `{_clean(stopped)}`')
+    if failed:
+        lines.append(f'⚠️ {len(failed)} failed:')
+        lines += [f'  • {_md(n)}: `{_clean(e)}`' for n, e in failed[:10]]
+        if len(failed) > 10:
+            lines.append(f'  …and {len(failed) - 10} more (see yoto_errors.log)')
+    progress.update('Done.' if saved else 'Finished with errors.', force=True)
+    tg_send(bot_token, chat_id, '\n'.join(lines))
+    log_activity(f'audiobook job done  book={book["path"]!r}  uploaded={len(uploaded)}  '
+                 f'failed={len(failed)}  saved={saved}  stopped={stopped!r}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2203,16 +2685,15 @@ def _do_yt_batch_upload(bot_token: str, chat_id: int, card: dict,
         tg_send(bot_token, chat_id, '\n'.join(lines))
 
 
-def get_file_bytes(source: str) -> tuple[bytes, str]:
+def get_file_source(source: str) -> tuple[Path, str, int]:
     """
-    Get file bytes and filename from a source string.
-    Currently: local file path only.
-    Future extension points:
-      - If source starts with 'https://' → download via urllib
-      - If source is a Telegram file_id   → call getFile bot API
+    Resolve a source string to (path, filename, size) for a streamed upload.
+    Currently: local file path only. Callers open and stream the file
+    themselves rather than loading it into memory (audiobook pieces are
+    up to ~100 MB).
     """
     path = Path(source)
-    return path.read_bytes(), path.name
+    return path, path.name, path.stat().st_size
 
 
 # ═══════════════════════════════════════════════════════════════════════════
